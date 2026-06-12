@@ -15,17 +15,16 @@ jobs:
   # Linux: full engine build + lint + integration tests (DoH egress + unix
   # socket) on the self-hosted runner.
   linux:
-    runs-on: [self-hosted, linux, vps1]
+    # Prefers the self-hosted vps1 runner, but it belongs to an org runner
+    # group not (yet) granted to this repo. Until an org admin adds this repo to
+    # the group, run on the hosted ubuntu runner. To switch back, replace the
+    # line below with: runs-on: [self-hosted, linux, vps1]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Ensure Rust toolchain
-        shell: bash
-        run: |
-          if ! command -v cargo >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/rustup" component add rustfmt clippy >/dev/null 2>&1 || true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: rustfmt
         run: cargo fmt --all --check
