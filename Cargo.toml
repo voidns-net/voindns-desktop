@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/voindns-proto",
+    "crates/voindns-core",
+    "crates/voindns-service",
+]
+# gui/src-tauri is built via `cargo tauri` from gui/ and kept out of the
+# library workspace so `cargo build` here stays headless-friendly.
+exclude = ["gui/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+authors = ["voindns"]
+
+[workspace.dependencies]
+voindns-proto = { path = "crates/voindns-proto" }
+voindns-core = { path = "crates/voindns-core" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures-util = "0.3"
+interprocess = { version = "2", features = ["tokio"] }
+bytes = "1"

@@ -1,0 +1,8 @@
+/target
+**/target
+node_modules
+/gui/build
+/gui/.svelte-kit
+/gui/src-tauri/gen
+.DS_Store
+*.log

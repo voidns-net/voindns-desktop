@@ -1,0 +1,22 @@
+:root {
+  --bg: #1b1b1f;
+  --fg: #d7d8db;
+  --muted: #8a8a90;
+  --apricot: #fbb26a;
+  --err: #ff6b6b;
+  font-family: 'PT Root UI', system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  user-select: none;
+  -webkit-user-select: none;
+}
