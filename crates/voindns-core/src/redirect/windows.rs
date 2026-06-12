@@ -1,11 +1,67 @@
-//! Windows DNS redirect.
+//! Windows DNS redirect — ported from AmneziaVPN's `DnsUtilsWindows`.
 //!
-//! Primary: native `SetInterfaceDnsSettings` (IP Helper) — mirrors AmneziaVPN's
-//! `DnsUtilsWindows`. Falls back to `netsh` (Amnezia's documented fallback) when
-//! the native call is unavailable (< Win10 20H1) or errors. Active adapters are
-//! enumerated via `netsh interface show interface` (read-only; parser-tested),
-//! then each alias's LUID→GUID is resolved and DNS set natively. IPv4 only for
-//! the MVP (matches prior behaviour; IPv6 is a tracked follow-up).
+//! Source (MPL-2.0, Mozilla VPN lineage):
+//!   client/platforms/windows/daemon/dnsutilswindows.cpp
+//!   client/platforms/windows/daemon/dnsutilswindows.h
+//!   <https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/platforms/windows/daemon/dnsutilswindows.cpp>
+//!
+//! Original Amnezia code this module mirrors (verbatim, condensed):
+//! ```cpp
+//! bool DnsUtilsWindows::updateResolvers(const QString& ifname,
+//!                                       const QList<QHostAddress>& resolvers) {
+//!   MIB_IF_ROW2 entry;
+//!   ConvertInterfaceAliasToLuid((wchar_t*)ifname.utf16(), &entry.InterfaceLuid);
+//!   GetIfEntry2(&entry);
+//!   m_luid = entry.InterfaceLuid.Value;
+//!   if (m_setInterfaceDnsSettingsProcAddr == nullptr)
+//!     return updateResolversNetsh(entry.InterfaceIndex, resolvers);
+//!   return updateResolversWin32(entry.InterfaceGuid, resolvers);
+//! }
+//!
+//! bool DnsUtilsWindows::updateResolversWin32(GUID guid, const QList<QHostAddress>& resolvers) {
+//!   DNS_INTERFACE_SETTINGS settings;
+//!   settings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
+//!   settings.Flags = DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST;
+//!   settings.Domain = nullptr; settings.NameServer = nullptr;
+//!   settings.SearchList = (wchar_t*)L".";
+//!   settings.RegistrationEnabled = false; settings.RegisterAdapterName = false;
+//!   settings.EnableLLMNR = false; settings.QueryAdapterName = false;
+//!   settings.ProfileNameServer = nullptr;
+//!   settings.NameServer = (wchar_t*)v4resolverstring.utf16();      // IPv4
+//!   DWORD v4result = m_setInterfaceDnsSettingsProcAddr(guid, &settings);
+//!   settings.Flags |= DNS_SETTING_IPV6;                            // IPv6
+//!   settings.NameServer = (wchar_t*)v6resolverstring.utf16();
+//!   DWORD v6result = m_setInterfaceDnsSettingsProcAddr(guid, &settings);
+//!   return (v4result == NO_ERROR) && (v6result == NO_ERROR);
+//! }
+//!
+//! bool DnsUtilsWindows::restoreResolvers() {        // also called from ~DnsUtilsWindows
+//!   if (m_luid == 0) return true;
+//!   MIB_IF_ROW2 entry; entry.InterfaceLuid.Value = m_luid; GetIfEntry2(&entry);
+//!   QList<QHostAddress> empty;                       // empty list clears the override
+//!   return updateResolversWin32(entry.InterfaceGuid, empty);
+//! }
+//! ```
+//!
+//! Divergences from Amnezia (with reasons):
+//! 1. Adapter selection — Amnezia configures the single VPN tunnel interface
+//!    passed as `ifname`. voindns has no tunnel, so we enumerate every connected
+//!    adapter via `netsh interface show interface` and point each at the proxy.
+//! 2. LUID→GUID — Amnezia does ConvertInterfaceAliasToLuid → GetIfEntry2 →
+//!    `InterfaceGuid`; we do ConvertInterfaceAliasToLuid → ConvertInterfaceLuidToGuid
+//!    (same GUID, without materialising `MIB_IF_ROW2`).
+//! 3. IPv4 only — Amnezia also sets IPv6 DNS (`DNS_SETTING_IPV6`). Our proxy binds
+//!    `127.0.0.1` only, so pointing system IPv6 DNS at a non-listening address
+//!    would break IPv6 resolution. IPv6 is a follow-up (proxy must also bind
+//!    `[::1]:53`).
+//! 4. API binding — Amnezia runtime-loads `SetInterfaceDnsSettings` via
+//!    `GetProcAddress` to degrade to netsh on < Win10 20H1. We link it directly
+//!    (windows-rs) and fall back to netsh on call error; the MVP targets
+//!    Win10 20H1+ (a `GetProcAddress`/delay-load probe is a follow-up).
+//! 5. Settings init — Amnezia sets each `DNS_INTERFACE_SETTINGS` field explicitly;
+//!    we use `::default()` (zero-init → same values) then set the four fields.
+//! 6. Restore — Amnezia re-resolves by saved LUID; we track the aliases we set and
+//!    clear each (empty NameServer). Same effect: revert to DHCP-assigned DNS.
 
 use std::iter::once;
 use std::net::IpAddr;

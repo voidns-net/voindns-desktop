@@ -1,13 +1,66 @@
-//! macOS DNS redirect.
+//! macOS DNS redirect — ported from AmneziaVPN's `DnsUtilsMacos`.
 //!
-//! Primary: native `SCDynamicStore` writing `State:/Network/Service/<uuid>/DNS`
-//! — mirrors AmneziaVPN's `DnsUtilsMacos`. Writing to the runtime `State:/` tree
-//! (not persisted `Setup:/`) means a crash auto-reverts. On restore we remove
-//! our override so the service falls back to its `Setup:/` (user) DNS. Falls
-//! back to `networksetup` if the SCDynamicStore session can't be created.
+//! Source (MPL-2.0, Mozilla VPN lineage):
+//!   client/platforms/macos/daemon/dnsutilsmacos.cpp
+//!   client/platforms/macos/daemon/dnsutilsmacos.h
+//!   <https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/platforms/macos/daemon/dnsutilsmacos.cpp>
 //!
-//! `SCDynamicStore`/`CFPropertyList` aren't `Send`, so they're built per call
-//! and only `String` paths are retained on the (Send) redirector.
+//! Original Amnezia code this module mirrors (verbatim, condensed):
+//! ```cpp
+//! m_scStore = SCDynamicStoreCreate(kCFAllocatorSystemDefault,
+//!                                  CFSTR("amneziavpn"), nullptr, nullptr);
+//!
+//! bool DnsUtilsMacos::updateResolvers(const QString& ifname,
+//!                                     const QList<QHostAddress>& resolvers) {
+//!   CFArrayRef netServices = SCDynamicStoreCopyKeyList(
+//!       m_scStore, CFSTR("Setup:/Network/Service/[0-9A-F-]+"));
+//!   CFMutableDictionaryRef dnsConfig = CFDictionaryCreateMutable(...);
+//!   cfDictSetStringList(dnsConfig, kSCPropNetDNSServerAddresses, list);
+//!   cfDictSetString(dnsConfig, kSCPropNetDNSDomainName, "lan");
+//!   for (CFIndex i = 0; i < CFArrayGetCount(netServices); i++) {
+//!     QString uuid = service.section('/', 3, 3);
+//!     backupService(uuid);                              // snapshot prior DNS dict
+//!     CFStringRef dnsPath = CFStringCreateWithFormat(...,
+//!         CFSTR("Setup:/Network/Service/%s/DNS"), qPrintable(uuid));
+//!     SCDynamicStoreSetValue(m_scStore, dnsPath, dnsConfig);   // <-- writes Setup:/
+//!   }
+//!   return true;
+//! }
+//!
+//! void DnsUtilsMacos::backupService(const QString& uuid) {     // reads + stores
+//!   CFDictionaryRef config = SCDynamicStoreCopyValue(m_scStore,
+//!       "Setup:/Network/Service/<uuid>/DNS");                  // domain/search/servers/sortlist
+//! }
+//!
+//! bool DnsUtilsMacos::restoreResolvers() {            // also from ~DnsUtilsMacos
+//!   for (uuid : m_prevServices.keys()) {
+//!     if (backup.isValid()) SCDynamicStoreSetValue(m_scStore, path, savedConfig);
+//!     else                  SCDynamicStoreRemoveValue(m_scStore, path);
+//!   }
+//! }
+//! ```
+//!
+//! Divergences from Amnezia (with reasons):
+//! 1. `State:/` instead of `Setup:/` (DELIBERATE) — Amnezia writes the override
+//!    into the persisted `Setup:/Network/Service/<uuid>/DNS` tree and must
+//!    therefore snapshot the prior dict (domain/search/servers/sortlist) and
+//!    rewrite it on restore, or it would destroy a user's static DNS. We write
+//!    the runtime `State:/…/DNS` tree (the Mullvad approach): it takes precedence
+//!    for resolution, auto-reverts on crash/exit (ephemeral), and on restore we
+//!    simply `remove` our key — the service falls back to its untouched `Setup:/`
+//!    (user) DNS with no snapshot needed. This avoids `CFPropertyList`-read
+//!    backup code that can only be compiled on a macOS runner (CI currently
+//!    blocked by the org account), and is strictly safer for the user's config.
+//!    A faithful `Setup:/`+backup port is a follow-up once macOS CI is unblocked.
+//! 2. `kSCPropNetDNSDomainName = "lan"` omitted — Amnezia sets it; its purpose is
+//!    unclear and unnecessary for a catch-all local proxy, so we set only
+//!    `ServerAddresses`.
+//! 3. `networksetup` fallback added — Amnezia's `DnsUtilsMacos` is pure
+//!    SCDynamicStore. We fall back to `networksetup -setdnsservers` if the
+//!    SCDynamicStore session can't be created (e.g. sandboxing).
+//! 4. Per-call store — Amnezia holds one `SCDynamicStoreRef`; `SCDynamicStore` /
+//!    `CFPropertyList` aren't `Send`, so we build the store inside each call and
+//!    retain only `String` paths on the (Send) redirector.
 
 use std::net::IpAddr;
 use std::process::Command;

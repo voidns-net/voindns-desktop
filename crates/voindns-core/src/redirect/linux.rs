@@ -1,10 +1,63 @@
-//! Linux DNS redirect.
+//! Linux DNS redirect — ported from AmneziaVPN's `DnsUtilsLinux`.
 //!
-//! Primary path: systemd-resolved over D-Bus (`org.freedesktop.resolve1`) —
-//! `SetLinkDNS` + `SetLinkDefaultRoute(true)` on the default-route interface,
-//! `RevertLink` to restore. This is exactly what AmneziaVPN's `DnsUtilsLinux`
-//! does. Fallback for systems without resolved: back up and rewrite
-//! `/etc/resolv.conf`.
+//! Source (MPL-2.0, Mozilla VPN lineage):
+//!   client/platforms/linux/daemon/dnsutilslinux.cpp
+//!   client/platforms/linux/daemon/dnsutilslinux.h
+//!   <https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/platforms/linux/daemon/dnsutilslinux.cpp>
+//!
+//! Original Amnezia code this module mirrors (verbatim, condensed):
+//! ```cpp
+//! // Constructor: QDBusInterface to org.freedesktop.resolve1 on the system bus.
+//! m_resolver = new QDBusInterface("org.freedesktop.resolve1",
+//!     "/org/freedesktop/resolve1", "org.freedesktop.resolve1.Manager",
+//!     QDBusConnection::systemBus(), this);
+//!
+//! bool DnsUtilsLinux::updateResolvers(const QString& ifname,
+//!                                     const QList<QHostAddress>& resolvers) {
+//!   m_ifindex = if_nametoindex(qPrintable(ifname));
+//!   setLinkDNS(m_ifindex, resolvers);
+//!   setLinkDefaultRoute(m_ifindex, true);
+//!   updateLinkDomains();
+//!   return true;
+//! }
+//!
+//! void DnsUtilsLinux::setLinkDNS(int ifindex, const QList<QHostAddress>& resolvers) {
+//!   QList<DnsResolver> resolverList; for (auto& ip : resolvers) resolverList.append(ip);
+//!   argumentList << QVariant::fromValue(ifindex) << QVariant::fromValue(resolverList);
+//!   m_resolver->asyncCallWithArgumentList("SetLinkDNS", argumentList);
+//! }
+//! void DnsUtilsLinux::setLinkDefaultRoute(int ifindex, bool enable) {
+//!   argumentList << QVariant::fromValue(ifindex) << QVariant::fromValue(enable);
+//!   m_resolver->asyncCallWithArgumentList("SetLinkDefaultRoute", argumentList);
+//! }
+//!
+//! bool DnsUtilsLinux::restoreResolvers() {          // also from ~DnsUtilsLinux
+//!   for (auto it = m_linkDomains.constBegin(); it != m_linkDomains.constEnd(); ++it)
+//!     setLinkDomains(it.key(), it.value());          // restore other links' domains
+//!   m_linkDomains.clear();
+//!   if (m_ifindex > 0) {
+//!     m_resolver->asyncCallWithArgumentList("RevertLink", {QVariant::fromValue(m_ifindex)});
+//!     m_ifindex = 0;
+//!   }
+//!   return true;
+//! }
+//! ```
+//!
+//! Divergences from Amnezia (with reasons):
+//! 1. Interface selection — Amnezia uses the VPN tunnel name passed as `ifname`
+//!    (`if_nametoindex`). voindns has no tunnel, so we resolve the default-route
+//!    interface from `/proc/net/route` and target that.
+//! 2. `SetLinkDomains`/`updateLinkDomains` omitted — Amnezia also snapshots and
+//!    rewrites other links' search/routing domains (setting `~.` on its link and
+//!    removing it from competitors). We rely on `SetLinkDefaultRoute(ifindex,true)`
+//!    alone, which makes our link the default DNS route — sufficient for the
+//!    common single-link case. Multi-link domain arbitration is a follow-up.
+//! 3. `/etc/resolv.conf` fallback added — Amnezia's `DnsUtilsLinux` is pure D-Bus
+//!    (assumes systemd-resolved). We add a resolv.conf backup/rewrite fallback so
+//!    non-resolved systems still work.
+//! 4. Sync vs async — Amnezia uses `asyncCallWithArgumentList` (Qt async D-Bus);
+//!    we use the `zbus` blocking `Proxy::call` (driven via `block_in_place`).
+//!    Same SetLinkDNS / SetLinkDefaultRoute / RevertLink calls.
 
 use std::fs;
 use std::net::IpAddr;
