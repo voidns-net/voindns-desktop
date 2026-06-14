@@ -1,0 +1,32 @@
+[package]
+name = "voidns-gui"
+version = "0.1.0"
+description = "VoidNS Client"
+authors = ["voidns"]
+edition = "2021"
+
+[lib]
+name = "voidns_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Unprivileged client: talks to the root voidns-service over a local socket.
+# Depends only on the shared protocol types — NOT voidns-core (no proxy/redirect,
+# no privileged deps in the GUI). Framing lives in src/ipc.rs.
+voidns-proto = { path = "../../voidns-proto" }
+interprocess = { version = "2", features = ["tokio"] }
+tokio = { version = "1", features = ["rt", "io-util", "net", "time", "sync"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -1,8 +1,12 @@
 /target
 **/target
 node_modules
-/gui/build
-/gui/.svelte-kit
-/gui/src-tauri/gen
+
+# GUI build output (Vite + Tauri codegen)
+/crates/gui/dist
+/crates/gui/build
+/crates/gui/.svelte-kit
+/crates/gui/src-tauri/gen
+
 .DS_Store
 *.log

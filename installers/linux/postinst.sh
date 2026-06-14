@@ -3,10 +3,10 @@
 # Run as root by the package manager.
 set -e
 
-install -Dm755 voindns-service /usr/lib/voindns/voindns-service
-install -Dm644 voindns.service /etc/systemd/system/voindns.service
+install -Dm755 voidns-service /usr/lib/voidns/voidns-service
+install -Dm644 voidns.service /etc/systemd/system/voidns.service
 
 systemctl daemon-reload
-systemctl enable --now voindns.service
+systemctl enable --now voidns.service
 
-echo "voindns service installed and started."
+echo "voidns service installed and started."

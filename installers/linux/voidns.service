@@ -1,0 +1,24 @@
+[Unit]
+Description=voidns local DoH proxy and DNS redirector
+Documentation=https://voidns.net
+After=network-online.target systemd-resolved.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/lib/voidns/voidns-service run
+Restart=on-failure
+RestartSec=3
+
+# /run/voidns is created for the control socket.
+RuntimeDirectory=voidns
+RuntimeDirectoryMode=0755
+
+# Bind :53 and edit system DNS. Runs as root for the MVP (systemd-resolved
+# D-Bus + resolv.conf fallback need privilege). Tighten with a dedicated user +
+# CAP_NET_ADMIN/CAP_NET_BIND_SERVICE in a follow-up.
+Environment=VOIDNS_PORT=53
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

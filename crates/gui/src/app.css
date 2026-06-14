@@ -1,0 +1,63 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&display=swap");
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  /* Окно frameless + transparent — углы карточки за её радиусом сквозные,
+     виден рабочий стол, glow карточки не обрезается рамкой окна. */
+  background: transparent;
+  overflow: hidden;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv05" "cv08" "tnum";
+  letter-spacing: -0.003em;
+}
+
+#app {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+input::placeholder {
+  color: rgba(232, 234, 246, 0.35);
+}
+
+@keyframes vn-spin {
+  from { transform: rotate(0); }
+  to { transform: rotate(360deg); }
+}
+@keyframes vn-spinrev {
+  from { transform: rotate(0); }
+  to { transform: rotate(-360deg); }
+}
+@keyframes vn-core {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.32); opacity: 1; }
+}
+@keyframes vn-ping {
+  0% { transform: scale(0.32); opacity: 0.55; }
+  80% { opacity: 0; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+@keyframes vn-tw {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.85; }
+}

@@ -1,23 +1,23 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/voindns-proto",
-    "crates/voindns-core",
-    "crates/voindns-service",
+    "crates/voidns-proto",
+    "crates/voidns-core",
+    "crates/voidns-service",
 ]
-# gui/src-tauri is built via `cargo tauri` from gui/ and kept out of the
-# library workspace so `cargo build` here stays headless-friendly.
-exclude = ["gui/src-tauri"]
+# crates/gui/src-tauri is built via `cargo tauri` from crates/gui and kept out
+# of the library workspace so `cargo build` here stays headless-friendly.
+exclude = ["crates/gui/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
-authors = ["voindns"]
+authors = ["voidns"]
 
 [workspace.dependencies]
-voindns-proto = { path = "crates/voindns-proto" }
-voindns-core = { path = "crates/voindns-core" }
+voidns-proto = { path = "crates/voidns-proto" }
+voidns-core = { path = "crates/voidns-core" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

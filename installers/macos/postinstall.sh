@@ -3,11 +3,11 @@
 set -e
 
 install -d /Library/PrivilegedHelperTools
-install -m755 voindns-service /Library/PrivilegedHelperTools/net.voindns.proxy
-install -m644 net.voindns.proxy.plist /Library/LaunchDaemons/net.voindns.proxy.plist
-chown root:wheel /Library/LaunchDaemons/net.voindns.proxy.plist
+install -m755 voidns-service /Library/PrivilegedHelperTools/net.voidns.proxy
+install -m644 net.voidns.proxy.plist /Library/LaunchDaemons/net.voidns.proxy.plist
+chown root:wheel /Library/LaunchDaemons/net.voidns.proxy.plist
 
-launchctl bootstrap system /Library/LaunchDaemons/net.voindns.proxy.plist || \
-  launchctl load -w /Library/LaunchDaemons/net.voindns.proxy.plist
+launchctl bootstrap system /Library/LaunchDaemons/net.voidns.proxy.plist || \
+  launchctl load -w /Library/LaunchDaemons/net.voidns.proxy.plist
 
-echo "voindns daemon installed."
+echo "voidns daemon installed."

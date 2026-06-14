@@ -12,13 +12,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Linux: full engine build + lint + integration tests (DoH egress + unix
-  # socket) on the self-hosted runner.
+  # Linux: lint + full engine build + tests, including the hermetic local-DoH
+  # test (node mock) and the real-Cloudflare proxy test.
   linux:
-    # Prefers the self-hosted vps1 runner, but it belongs to an org runner
-    # group not (yet) granted to this repo. Until an org admin adds this repo to
-    # the group, run on the hosted ubuntu runner. To switch back, replace the
-    # line below with: runs-on: [self-hosted, linux, vps1]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +22,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install local DoH mock deps
+        working-directory: crates/voidns-core/tests/doh-mock
+        run: npm ci || npm install
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
@@ -35,9 +37,9 @@ jobs:
       - name: test
         run: cargo test --workspace --locked
 
-  # Windows & macOS: native build + per-platform tests. This is where
-  # redirect/windows.rs and redirect/macos.rs are compiled and the parser unit
-  # tests run on their real OS.
+  # Windows & macOS: native build + per-platform tests. redirect/windows.rs and
+  # redirect/macos.rs compile here, the parser unit tests run on their real OS,
+  # and the hermetic local-DoH test runs against the node mock.
   cross:
     strategy:
       fail-fast: false
@@ -48,17 +50,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install local DoH mock deps
+        working-directory: crates/voidns-core/tests/doh-mock
+        run: npm ci || npm install
       - name: build
         run: cargo build --workspace --locked
       - name: test
         run: cargo test --workspace --locked
 
-  # GUI frontend (Svelte) builds on every push.
+  # GUI frontend (Svelte): build on every push.
   frontend:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: gui
+        working-directory: crates/gui
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -66,3 +74,62 @@ jobs:
           node-version: 22
       - run: npm ci || npm install
       - run: npm run build
+
+  # Installers / artifacts: build the Tauri bundle + the privileged service
+  # binary per OS and upload them. Linux → .deb + AppImage, Windows → .msi/.exe,
+  # macOS → .dmg/.app.
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Linux GUI build deps (WebKitGTK)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev file
+
+      - name: Build privileged service (release)
+        run: cargo build --release --locked -p voidns-service
+
+      - name: Build GUI installer (Tauri bundle)
+        working-directory: crates/gui
+        shell: bash
+        run: |
+          npm ci || npm install
+          case "${{ matrix.os }}" in
+            ubuntu-latest)  npx tauri build --bundles deb,appimage ;;
+            windows-latest) npx tauri build --bundles msi,nsis ;;
+            macos-latest)   npx tauri build --bundles app,dmg ;;
+          esac
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          # Tauri bundles (paths differ per OS; copy whatever exists).
+          find crates/gui/src-tauri/target/release/bundle -type f \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \
+               -o -name '*.msi' -o -name '*.exe' -o -name '*.dmg' \) \
+            -exec cp -r {} dist/ \; 2>/dev/null || true
+          # Privileged service binary + unit + install scripts.
+          cp target/release/voidns-service* dist/ 2>/dev/null || true
+          cp -r installers dist/installers 2>/dev/null || true
+          ls -la dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: voidns-${{ matrix.os }}
+          path: dist/**
+          if-no-files-found: warn

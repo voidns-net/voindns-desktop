@@ -1,4 +1,4 @@
-# voindns-desktop
+# voidns-desktop
 
 Cross-platform desktop DNS client (Windows / Linux / macOS) in **Rust + Tauri 2 + Svelte**.
 One circular **Connect / Disconnect** button (Amnezia-style). On Connect it runs a local
@@ -6,19 +6,19 @@ One circular **Connect / Disconnect** button (Amnezia-style). On Connect it runs
 previous DNS. A privileged **background service** does the network work and starts at boot; an
 unprivileged **GUI** drives it over a local socket.
 
-See [desktop-client-plan.md](../voindns/desktop-client-plan.md) for the full design.
+See [desktop-client-plan.md](../voidns/desktop-client-plan.md) for the full design.
 
 ## Layout
 
 ```
 crates/
-  voindns-proto/     shared IPC protocol (Command/Event/Status/UpstreamSel)
-  voindns-core/      engine:
+  voidns-proto/     shared IPC protocol (Command/Event/Status/UpstreamSel)
+  voidns-core/      engine:
     proxy.rs           local DNS→DoH proxy (hickory-dns 0.26)
     redirect/          system DNS redirect per OS (linux/windows/macos)
     controller.rs      Connect/Disconnect state machine
     ipc.rs             GUI↔service local-socket protocol
-  voindns-service/   privileged daemon binary (run|install|uninstall)
+  voidns-service/   privileged daemon binary (run|install|uninstall)
 gui/                 Tauri 2 + SvelteKit app (ConnectButton, status)
 installers/          systemd unit / launchd plist / NSIS hook
 ```
@@ -40,10 +40,10 @@ installers/          systemd unit / launchd plist / NSIS hook
 ```bash
 # Engine + service (verified on Linux):
 cargo build
-cargo test -p voindns-core            # proxy_doh + ipc_roundtrip (proxy_doh needs HTTPS egress)
+cargo test -p voidns-core            # proxy_doh + ipc_roundtrip (proxy_doh needs HTTPS egress)
 
 # Run the service in the foreground (unprivileged dev: high port + temp socket):
-VOINDNS_PORT=15353 VOINDNS_SOCK=/tmp/voindns.sock cargo run -p voindns-service
+VOIDNS_PORT=15353 VOIDNS_SOCK=/tmp/voidns.sock cargo run -p voidns-service
 
 # Frontend:
 cd gui && npm install && npm run build
@@ -52,19 +52,19 @@ cd gui && npm install && npm run build
 cd gui && npm run tauri dev
 ```
 
-The DoH proxy binds `127.0.0.1:53` in production (privileged); set `VOINDNS_PORT` to a high port
-for unprivileged runs. `VOINDNS_SOCK` overrides the IPC socket path.
+The DoH proxy binds `127.0.0.1:53` in production (privileged); set `VOIDNS_PORT` to a high port
+for unprivileged runs. `VOIDNS_SOCK` overrides the IPC socket path.
 
 ## Caveats / follow-ups
 
 - **Tauri native build (this environment).** `tauri-utils 2.9.2` triggers an `E0119` coherence
   false-positive under rustc 1.95 (and the installed Jan-2026 nightly). It is not in our code —
-  the identical IPC-client code compiles fine inside `voindns-core`. Build the GUI with a
+  the identical IPC-client code compiles fine inside `voidns-core`. Build the GUI with a
   Tauri-supported stable toolchain, or once a fixed `tauri-utils` is published.
 - **Native redirect.** Windows/macOS use `netsh`/`networksetup` (Amnezia's documented fallback).
   The native `SetInterfaceDnsSettings` (windows-rs) and `SCDynamicStore` paths are tracked
   follow-ups (plan §6).
-- **voindns DoH endpoint.** `UpstreamSel::Voindns` ships a placeholder bootstrap IP in
+- **voidns DoH endpoint.** `UpstreamSel::Voidns` ships a placeholder bootstrap IP in
   `proxy.rs`; wire the real anycast IP before release.
 - **GUI dep weight / IPC hardening.** Split an `ipc-client` crate so the GUI doesn't link
   hickory/zbus; add `SO_PEERCRED`/DACL peer checks on the socket.

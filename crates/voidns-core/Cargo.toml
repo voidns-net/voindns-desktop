@@ -1,0 +1,48 @@
+[package]
+name = "voidns-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+voidns-proto = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures-util = { workspace = true }
+interprocess = { workspace = true }
+bytes = { workspace = true }
+
+hickory-server = { version = "0.26", default-features = false, features = ["resolver", "https-ring"] }
+hickory-resolver = { version = "0.26", default-features = false, features = ["https-ring", "tokio", "webpki-roots"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# systemd-resolved control over D-Bus (org.freedesktop.resolve1), blocking API.
+zbus = { version = "5", default-features = false, features = ["tokio", "blocking-api"] }
+nix = { version = "0.29", features = ["socket", "user", "fs", "net"] }
+
+# Windows: native SetInterfaceDnsSettings (IP Helper) — netsh kept as fallback.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+] }
+
+# macOS: native SCDynamicStore — networksetup kept as fallback.
+[target.'cfg(target_os = "macos")'.dependencies]
+system-configuration = "0.7"
+core-foundation = "0.10"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "process"] }
+# Hermetic DoH test: generate a cert for the local mock and trust it via a
+# programmatic RootCertStore. rustls is pinned to hickory's version (0.23, ring)
+# so the ClientConfig type unifies with ResolverBuilder::with_tls_config.
+rcgen = "0.13"
+rustls = "0.23"
+hickory-resolver = { version = "0.26", default-features = false, features = ["https-ring", "tokio"] }
