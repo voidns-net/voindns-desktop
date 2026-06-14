@@ -34,9 +34,12 @@ windows = { version = "0.62", features = [
 ] }
 
 # macOS: native SCDynamicStore — networksetup kept as fallback.
+# core-foundation pinned to 0.9 so its CFPropertyList type matches the one
+# system-configuration 0.7 uses (it depends on core-foundation 0.9); mixing 0.10
+# here produces an E0308 `CFPropertyList` type mismatch in redirect/macos.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
 system-configuration = "0.7"
-core-foundation = "0.10"
+core-foundation = "0.9"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "process"] }
