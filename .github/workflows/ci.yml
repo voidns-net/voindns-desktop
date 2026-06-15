@@ -61,6 +61,275 @@ jobs:
       - name: test
         run: cargo test --workspace --locked
 
+  # Real system e2e (Linux): install the release service as a root systemd unit,
+  # point it at a local mock DoH server, then resolve a domain through the
+  # *system resolver* (`dig`) and confirm the query reached the mock. Proves the
+  # full path: install → privileged DNS redirect → proxy → DoH → mock.
+  system-e2e-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tools + mock deps
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y dnsutils
+          (cd crates/voidns-core/tests/doh-mock && (npm ci || npm install))
+
+      - name: Build service (release)
+        run: cargo build --release -p voidns-service --locked
+
+      - name: Generate + trust mock CA
+        run: |
+          set -euo pipefail
+          mkdir -p e2e-certs && cd e2e-certs
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt \
+            -days 2 -subj "/CN=voidns-e2e-ca"
+          openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=localhost"
+          openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+            -out leaf.crt -days 2 -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
+          sudo cp ca.crt /usr/local/share/ca-certificates/voidns-e2e.crt
+          sudo update-ca-certificates
+
+      - name: Start mock DoH server
+        run: |
+          set -euo pipefail
+          cd crates/voidns-core/tests/doh-mock
+          node mock-doh.mjs "$GITHUB_WORKSPACE/e2e-certs/leaf.crt" \
+            "$GITHUB_WORKSPACE/e2e-certs/leaf.key" 0 > "$GITHUB_WORKSPACE/mock.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/mock.pid"
+          for _ in $(seq 1 50); do
+            PORT=$(sed -n 's/^PORT=//p' "$GITHUB_WORKSPACE/mock.log" | head -1)
+            [ -n "$PORT" ] && break || sleep 0.2
+          done
+          [ -n "${PORT:-}" ] || { echo "mock did not report PORT"; cat "$GITHUB_WORKSPACE/mock.log"; exit 1; }
+          echo "MOCK_PORT=$PORT" >> "$GITHUB_ENV"
+
+      - name: Install + start service (systemd)
+        run: |
+          set -euo pipefail
+          sudo install -Dm755 target/release/voidns-service /usr/lib/voidns/voidns-service
+          sudo install -Dm644 installers/linux/voidns.service /etc/systemd/system/voidns.service
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now voidns.service
+          for _ in $(seq 1 50); do
+            sudo /usr/lib/voidns/voidns-service status >/dev/null 2>&1 && break || sleep 0.2
+          done
+          sudo systemctl --no-pager status voidns.service | head -15 || true
+
+      - name: Connect to mock + resolve through the system
+        run: |
+          set -euo pipefail
+          sudo /usr/lib/voidns/voidns-service connect custom 127.0.0.1 localhost /dns-query "$MOCK_PORT"
+          sudo resolvectl flush-caches 2>/dev/null || sudo systemd-resolve --flush-caches 2>/dev/null || true
+          # Trigger a resolution through the system resolver. Prefer resolvectl
+          # (talks to systemd-resolved directly, which we redirected); fall back
+          # to dig (resolv.conf path) if resolved isn't the active mechanism.
+          : > /tmp/resolve.out
+          resolvectl query example.com 2>&1 | tee -a /tmp/resolve.out || true
+          dig +short +tries=2 +time=3 example.com A 2>&1 | tee -a /tmp/resolve.out || true
+          echo "---- resolve.out ----"; cat /tmp/resolve.out
+          echo "---- mock.log ----"; cat "$GITHUB_WORKSPACE/mock.log"
+          # Hard gate: the query must have reached the mock through the redirect.
+          grep -q "^QUERY=example.com" "$GITHUB_WORKSPACE/mock.log" \
+            || { echo "FAIL: mock never received the query"; exit 1; }
+          grep -q "127.0.0.1" /tmp/resolve.out \
+            || { echo "FAIL: resolver did not return 127.0.0.1"; exit 1; }
+          echo "OK: system resolve reached the mock and returned 127.0.0.1"
+
+      - name: Teardown
+        if: always()
+        run: |
+          sudo /usr/lib/voidns/voidns-service disconnect || true
+          sudo systemctl stop voidns.service || true
+          [ -f "$GITHUB_WORKSPACE/mock.pid" ] && kill "$(cat "$GITHUB_WORKSPACE/mock.pid")" 2>/dev/null || true
+
+  # Real system e2e (macOS): install the release service as a root LaunchDaemon,
+  # point it at the mock, resolve through the system resolver (dscacheutil →
+  # mDNSResponder, which honors the SCDynamicStore DNS the service set) and
+  # confirm the query reached the mock.
+  system-e2e-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Mock deps
+        run: cd crates/voidns-core/tests/doh-mock && (npm ci || npm install)
+
+      - name: Build service (release)
+        run: cargo build --release -p voidns-service --locked
+
+      - name: Generate + trust mock CA
+        run: |
+          set -euo pipefail
+          mkdir -p e2e-certs && cd e2e-certs
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt \
+            -days 2 -subj "/CN=voidns-e2e-ca"
+          openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=localhost"
+          openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+            -out leaf.crt -days 2 -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
+          sudo security add-trusted-cert -d -r trustRoot \
+            -k /Library/Keychains/System.keychain ca.crt
+
+      - name: Start mock DoH server
+        run: |
+          set -euo pipefail
+          cd crates/voidns-core/tests/doh-mock
+          node mock-doh.mjs "$GITHUB_WORKSPACE/e2e-certs/leaf.crt" \
+            "$GITHUB_WORKSPACE/e2e-certs/leaf.key" 0 > "$GITHUB_WORKSPACE/mock.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/mock.pid"
+          for _ in $(seq 1 50); do
+            PORT=$(sed -n 's/^PORT=//p' "$GITHUB_WORKSPACE/mock.log" | head -1)
+            [ -n "$PORT" ] && break || sleep 0.2
+          done
+          [ -n "${PORT:-}" ] || { echo "mock did not report PORT"; cat "$GITHUB_WORKSPACE/mock.log"; exit 1; }
+          echo "MOCK_PORT=$PORT" >> "$GITHUB_ENV"
+
+      - name: Install + start service (LaunchDaemon)
+        run: |
+          set -euo pipefail
+          sudo install -m755 target/release/voidns-service /Library/PrivilegedHelperTools/net.voidns.proxy
+          sudo install -m644 installers/macos/net.voidns.proxy.plist /Library/LaunchDaemons/net.voidns.proxy.plist
+          sudo chown root:wheel /Library/LaunchDaemons/net.voidns.proxy.plist
+          sudo launchctl bootstrap system /Library/LaunchDaemons/net.voidns.proxy.plist
+          for _ in $(seq 1 50); do
+            sudo VOIDNS_SOCK=/var/run/net.voidns.proxy.sock \
+              /Library/PrivilegedHelperTools/net.voidns.proxy status >/dev/null 2>&1 && break || sleep 0.2
+          done
+
+      - name: Connect to mock + resolve through the system
+        run: |
+          set -euo pipefail
+          export SOCK=/var/run/net.voidns.proxy.sock
+          sudo VOIDNS_SOCK=$SOCK /Library/PrivilegedHelperTools/net.voidns.proxy \
+            connect custom 127.0.0.1 localhost /dns-query "$MOCK_PORT"
+          sudo dscacheutil -flushcache || true
+          sudo killall -HUP mDNSResponder || true
+          ANS=$(dscacheutil -q host -a name example.com | awk '/^ip_address:/ {print $2; exit}')
+          echo "dscacheutil example.com => '$ANS'"
+          echo "---- mock.log ----"; cat "$GITHUB_WORKSPACE/mock.log"
+          grep -q "^QUERY=example.com" "$GITHUB_WORKSPACE/mock.log" \
+            || { echo "FAIL: mock never received the query"; exit 1; }
+          [ "$ANS" = "127.0.0.1" ] || { echo "FAIL: unexpected answer '$ANS'"; exit 1; }
+          echo "OK: system resolve reached the mock and returned 127.0.0.1"
+
+      - name: Teardown
+        if: always()
+        run: |
+          sudo VOIDNS_SOCK=/var/run/net.voidns.proxy.sock \
+            /Library/PrivilegedHelperTools/net.voidns.proxy disconnect || true
+          sudo launchctl bootout system /Library/LaunchDaemons/net.voidns.proxy.plist || true
+          [ -f "$GITHUB_WORKSPACE/mock.pid" ] && kill "$(cat "$GITHUB_WORKSPACE/mock.pid")" 2>/dev/null || true
+
+  # Real system e2e (Windows): install the release service via `sc`, point it at
+  # the mock, resolve through the system resolver (Resolve-DnsName, which uses the
+  # interface DNS the service set) and confirm the query reached the mock.
+  system-e2e-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Mock deps
+        shell: bash
+        run: cd crates/voidns-core/tests/doh-mock && (npm ci || npm install)
+
+      - name: Build service (release)
+        run: cargo build --release -p voidns-service --locked
+
+      - name: Generate + trust mock CA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p e2e-certs && cd e2e-certs
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt \
+            -days 2 -subj "//CN=voidns-e2e-ca"
+          openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "//CN=localhost"
+          openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+            -out leaf.crt -days 2 -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
+
+      - name: Trust mock CA (Root store)
+        shell: pwsh
+        run: certutil -addstore -f Root "$env:GITHUB_WORKSPACE\e2e-certs\ca.crt"
+
+      - name: Start mock DoH server
+        shell: pwsh
+        run: |
+          $cert = "$env:GITHUB_WORKSPACE\e2e-certs\leaf.crt"
+          $key  = "$env:GITHUB_WORKSPACE\e2e-certs\leaf.key"
+          $log  = "$env:GITHUB_WORKSPACE\mock.log"
+          $p = Start-Process node -PassThru -WindowStyle Hidden `
+            -WorkingDirectory "crates\voidns-core\tests\doh-mock" `
+            -ArgumentList "mock-doh.mjs","$cert","$key","0" `
+            -RedirectStandardOutput $log -RedirectStandardError "$env:GITHUB_WORKSPACE\mock.err"
+          $p.Id | Out-File "$env:GITHUB_WORKSPACE\mock.pid"
+          $port = $null
+          foreach ($i in 1..50) {
+            if (Test-Path $log) {
+              $m = Select-String -Path $log -Pattern '^PORT=(\d+)' | Select-Object -First 1
+              if ($m) { $port = $m.Matches[0].Groups[1].Value; break }
+            }
+            Start-Sleep -Milliseconds 200
+          }
+          if (-not $port) { Get-Content $log,"$env:GITHUB_WORKSPACE\mock.err" -EA SilentlyContinue; throw "mock did not report PORT" }
+          "MOCK_PORT=$port" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install + start service (sc)
+        shell: pwsh
+        run: |
+          $bin = "$env:GITHUB_WORKSPACE\target\release\voidns-service.exe"
+          sc.exe create voidns binPath= "$bin run" start= demand DisplayName= "voidns" | Out-Host
+          sc.exe start voidns | Out-Host
+          foreach ($i in 1..50) {
+            & $bin status *> $null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Milliseconds 200
+          }
+
+      - name: Connect to mock + resolve through the system
+        shell: pwsh
+        run: |
+          $bin = "$env:GITHUB_WORKSPACE\target\release\voidns-service.exe"
+          & $bin connect custom 127.0.0.1 localhost /dns-query $env:MOCK_PORT
+          if ($LASTEXITCODE -ne 0) { throw "connect failed" }
+          ipconfig /flushdns | Out-Null
+          $ans = (Resolve-DnsName -Name example.com -Type A -DnsOnly -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Type -eq 'A' } | Select-Object -First 1).IPAddress
+          Write-Host "Resolve-DnsName example.com => '$ans'"
+          Write-Host "---- mock.log ----"; Get-Content "$env:GITHUB_WORKSPACE\mock.log"
+          if (-not (Select-String -Path "$env:GITHUB_WORKSPACE\mock.log" -Pattern '^QUERY=example.com' -Quiet)) {
+            throw "FAIL: mock never received the query"
+          }
+          if ($ans -ne '127.0.0.1') { throw "FAIL: unexpected answer '$ans'" }
+          Write-Host "OK: system resolve reached the mock and returned 127.0.0.1"
+
+      - name: Teardown
+        if: always()
+        shell: pwsh
+        run: |
+          $bin = "$env:GITHUB_WORKSPACE\target\release\voidns-service.exe"
+          & $bin disconnect 2>$null
+          sc.exe stop voidns 2>$null | Out-Null
+          sc.exe delete voidns 2>$null | Out-Null
+          if (Test-Path "$env:GITHUB_WORKSPACE\mock.pid") {
+            Stop-Process -Id (Get-Content "$env:GITHUB_WORKSPACE\mock.pid") -Force -EA SilentlyContinue
+          }
+
   # GUI frontend (Svelte): build on every push.
   frontend:
     runs-on: ubuntu-latest
@@ -133,3 +402,37 @@ jobs:
           name: voidns-${{ matrix.os }}
           path: dist/**
           if-no-files-found: warn
+
+  # Publish the per-OS installers to VPS1, where nginx serves them statically at
+  # voidns.net/downloads (the frontend + bot link there instead of GitHub releases).
+  publish:
+    needs: installers
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts            # → artifacts/voidns-<os>/...
+
+      - name: Rename installers to the stable names the web client expects
+        shell: bash
+        run: |
+          mkdir -p publish
+          # one installer per extension across all OS artifacts (last match wins)
+          find artifacts -name '*.msi'      -exec cp {} publish/VoidNS-Client-x64.msi \;
+          find artifacts -name '*.dmg'      -exec cp {} publish/VoidNS-Client.dmg \;
+          find artifacts -name '*.deb'      -exec cp {} publish/VoidNS-Client-amd64.deb \;
+          find artifacts -name '*.AppImage' -exec cp {} publish/VoidNS-Client-x86_64.AppImage \;
+          ls -la publish
+
+      - name: Push installers to VPS1 (nginx /downloads)
+        env:
+          SSH_KEY: ${{ secrets.VPS1_SSH_KEY }}
+          VPS1_HOST: ${{ secrets.VPS1_HOST }}   # deploy@host or host (SSH target)
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          SSH_OPTS="-o StrictHostKeyChecking=accept-new -i $HOME/.ssh/id_ed25519"
+          ssh $SSH_OPTS "$VPS1_HOST" 'mkdir -p /opt/voidns/infra/downloads'
+          scp $SSH_OPTS publish/* "$VPS1_HOST:/opt/voidns/infra/downloads/"

@@ -7,6 +7,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/voidns-proto/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/voidns-service/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/voidns-core/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/voidns-service/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

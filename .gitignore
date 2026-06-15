@@ -10,3 +10,9 @@ node_modules
 
 .DS_Store
 *.log
+
+# CI system-e2e scratch: throwaway mock CA/leaf certs + mock server logs
+/e2e-certs
+/mock.log
+/mock.err
+/mock.pid

@@ -42,6 +42,10 @@ function start(certPath, keyPath, port = 0) {
         stream.end()
         return
       }
+      // Log every queried name so an external test (CI system e2e) can confirm a
+      // `dig`/`nslookup` through the redirected system resolver actually reached
+      // this mock. One `QUERY=<name>` line per question.
+      for (const nm of decoded.names) process.stdout.write(`QUERY=${nm}\n`)
       const answer = dnsPacket.encode({
         type: 'response',
         id: decoded.id,

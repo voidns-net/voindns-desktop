@@ -21,22 +21,12 @@ export type UpstreamSel =
   | { kind: "cloudflare" }
   | { kind: "google" }
   | { kind: "quad9" }
-  | { kind: "custom"; ip: string; hostname: string; path: string };
+  | { kind: "custom"; ip: string; hostname: string; path: string; port?: number };
 
 const STATUS_EVENT = "voidns://status";
 
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
-/** Show the simulated Dev provider in debug builds (and in browser preview). */
-export async function isDevBuild(): Promise<boolean> {
-  if (!isTauri()) return true;
-  try {
-    return await invoke<boolean>("is_dev");
-  } catch {
-    return false;
-  }
 }
 
 export async function connect(upstream: UpstreamSel): Promise<Status> {

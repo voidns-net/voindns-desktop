@@ -4,9 +4,8 @@
   // Реальные провайдеры (Cloudflare/Google/Quad9/AdGuard/Mullvad/NextDNS и
   // VoidNS) подключаются по-настоящему: команды уходят в привилегированный
   // voidns-service по IPC, тот поднимает DoH-прокси и перенаправляет системный
-  // DNS (voidns-core). Провайдер "Dev" виден только в debug-сборке и просто
-  // имитирует подключение таймерами, ничего не трогая. Вне Tauri (vite /
-  // браузер-превью) бэкенда нет — всё имитируется, чтобы макет оставался живым.
+  // DNS (voidns-core). Вне Tauri (vite / браузер-превью) бэкенда нет — всё
+  // имитируется таймерами, чтобы макет оставался живым.
   //
   // Окно frameless: управление окном — через титлбар клиента (drag-region + кнопки).
 
@@ -39,14 +38,9 @@
     { id: "nextdns",    name: "NextDNS",     doh: "dns.nextdns.io",      dot: "dns.nextdns.io",                  ip: "45.90.28.0" },
   ];
 
-  // Имитация — только debug. В рантайме (release) этого провайдера нет.
-  const DEV_PROVIDER: Provider = {
-    id: "dev", name: "Dev", doh: "simulated", dot: "simulated", ip: "mock",
-  };
-
-  // Реальный бэкенд доступен только внутри Tauri; "dev" всегда имитируется.
+  // Реальный бэкенд доступен только внутри Tauri; в браузер-превью всё имитируется.
   const tauriAvailable = backend.isTauri();
-  const usesBackend = (id: string) => tauriAvailable && id !== "dev";
+  const usesBackend = () => tauriAvailable;
 
   function upstreamFor(id: string): UpstreamSel {
     switch (id) {
@@ -70,7 +64,6 @@
   let token = $state("");
   let tokenInput = $state("");
   let showTokenGate = $state(true);
-  let devVisible = $state(false);
   let connError = $state<string | null>(null); // short label shown under the core
   let errorDetail = $state<string | null>(null); // full backend message (tooltip)
 
@@ -83,9 +76,7 @@
     return "ERROR";
   }
 
-  const providers = $derived<Provider[]>(
-    devVisible ? [...BASE_PROVIDERS, DEV_PROVIDER] : BASE_PROVIDERS,
-  );
+  const providers: Provider[] = BASE_PROVIDERS;
 
   let connectTimer: ReturnType<typeof setTimeout> | undefined;
   let tickTimer: ReturnType<typeof setInterval> | undefined;
@@ -99,7 +90,7 @@
     tickTimer = setInterval(() => (elapsed += 1), 1000);
   }
 
-  // --- simulation (Dev provider / вне Tauri) ----------------------------------
+  // --- simulation (вне Tauri / браузер-превью) --------------------------------
   function simConnect(delay = 1500) {
     clearTimers();
     status = "connecting";
@@ -183,7 +174,7 @@
         console.error("[voidns] disconnect failed:", e);
       }
     }
-    if (usesBackend(providerId)) {
+    if (usesBackend()) {
       status = "connecting";
       elapsed = 0;
       connError = null;
@@ -195,7 +186,7 @@
         console.error("[voidns] reconnect failed:", e);
       }
     } else {
-      simConnect(900); // Dev mock
+      simConnect(900); // browser preview
     }
   }
 
@@ -211,10 +202,10 @@
         return;
       }
       connError = null;
-      if (usesBackend(providerId)) realConnect();
+      if (usesBackend()) realConnect();
       else simConnect();
     } else {
-      if (usesBackend(providerId)) realDisconnect();
+      if (usesBackend()) realDisconnect();
       else simDisconnect();
     }
   }
@@ -222,7 +213,7 @@
   function selectProvider(id: string) {
     const changed = id !== providerId;
     const wasConnected = status === "connected" || status === "connecting";
-    const prevWasBackend = usesBackend(providerId);
+    const prevWasBackend = usesBackend();
     providerId = id;
     open = false;
     if (!changed) return;
@@ -258,15 +249,10 @@
   onMount(() => {
     let unlisten: () => void = () => {};
     (async () => {
-      devVisible = await backend.isDevBuild();
       if (tauriAvailable) {
-        unlisten = await backend.onStatus((s) => {
-          if (providerId === "dev") return; // Dev — локальная имитация
-          applyStatus(s);
-        });
+        unlisten = await backend.onStatus((s) => applyStatus(s));
         try {
-          const s = await backend.getStatus();
-          if (providerId !== "dev") applyStatus(s);
+          applyStatus(await backend.getStatus());
         } catch {
           // service not up yet — subscription will catch up
         }
@@ -291,11 +277,9 @@
   const hasToken = $derived(!!token);
 
   const endpoint = $derived(
-    providerId === "dev"
-      ? "simulated — no real DNS change"
-      : protocol === "DoH"
-        ? `https://${sel.doh}/dns-query`
-        : `tls://${sel.dot}:853`,
+    protocol === "DoH"
+      ? `https://${sel.doh}/dns-query`
+      : `tls://${sel.dot}:853`,
   );
   const elapsedStr = $derived(
     `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`,
@@ -371,14 +355,11 @@
       const lock = p.id === "voidns" && !token;
       return {
         ...p,
-        host:
-          p.id === "dev"
-            ? "simulated — no real DNS"
-            : lock
-              ? "access token required"
-              : protocol === "DoH"
-                ? p.doh
-                : `${p.dot}:853`,
+        host: lock
+          ? "access token required"
+          : protocol === "DoH"
+            ? p.doh
+            : `${p.dot}:853`,
         selected: p.id === providerId,
         lockShow: lock,
         nameColor: p.id === providerId ? accent : "#e8eaf6",

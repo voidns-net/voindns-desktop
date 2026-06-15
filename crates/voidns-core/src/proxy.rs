@@ -57,17 +57,11 @@ impl DohProxy {
             options: Some(options),
         };
 
-        let zone = ForwardZoneHandler::builder_tokio(forward)
-            .with_origin(Name::root())
-            .build()
-            .map_err(|e| anyhow!("failed to build DoH forwarder: {e}"))?;
+        let zone = build_forward_zone(forward)?;
 
         // Root zone "." → catch-all forwarder.
         let mut catalog = Catalog::new();
-        catalog.upsert(
-            LowerName::from(Name::root()),
-            vec![Arc::new(zone) as Arc<dyn ZoneHandler>],
-        );
+        catalog.upsert(LowerName::from(Name::root()), vec![zone]);
 
         let mut server = Server::new(catalog);
 
@@ -114,14 +108,37 @@ fn upstream_name_servers(upstream: &UpstreamSel) -> Result<Vec<NameServerConfig>
                 Some(Arc::from(VOIDNS_DOH_PATH)),
             )]
         }
-        UpstreamSel::Custom { ip, hostname, path } => {
+        UpstreamSel::Custom {
+            ip,
+            hostname,
+            path,
+            port,
+        } => {
             let ip: IpAddr = ip.parse().context("custom DoH bootstrap IP")?;
-            vec![NameServerConfig::https(
+            let mut ns = NameServerConfig::https(
                 ip,
                 Arc::from(hostname.as_str()),
                 Some(Arc::from(path.as_str())),
-            )]
+            );
+            // `NameServerConfig::https` defaults to 443; override so the mock
+            // DoH server (and any non-standard endpoint) is reachable.
+            for conn in &mut ns.connections {
+                conn.port = *port;
+            }
+            vec![ns]
         }
     };
     Ok(servers)
+}
+
+/// Build the root "." forward zone: hickory's [`ForwardZoneHandler`] DoH
+/// forwarder. Upstream TLS trusts the OS trust store (rustls-platform-verifier),
+/// so a CA installed on the host — e.g. the CI e2e's local mock CA — is honored
+/// without any test-only code path here.
+fn build_forward_zone(forward: ForwardConfig) -> Result<Arc<dyn ZoneHandler>> {
+    let zone = ForwardZoneHandler::builder_tokio(forward)
+        .with_origin(Name::root())
+        .build()
+        .map_err(|e| anyhow!("failed to build DoH forwarder: {e}"))?;
+    Ok(Arc::new(zone))
 }

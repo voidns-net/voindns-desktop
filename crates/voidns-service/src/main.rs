@@ -6,15 +6,21 @@
 //! unprivileged GUI never needs root — it just sends commands over the local
 //! socket. See installers/linux/voidns.service + install-dev.sh.
 //!
-//! Modes (argv[1]): `run` (default, foreground), `install`, `uninstall`.
+//! Modes (argv[1]):
+//!   * `run` (default, foreground) — the daemon: proxy + redirector + IPC server.
+//!   * `install` / `uninstall` — installer hints.
+//!   * `connect <upstream>` / `disconnect` / `status` — control an already-running
+//!     daemon over IPC (the same commands the GUI sends). Lets the service be
+//!     driven from a terminal / script. `<upstream>` is one of
+//!     `cloudflare|google|quad9|voidns`, or `custom <ip> <hostname> <path> <port>`.
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
-use voidns_core::Controller;
-use voidns_proto::DEFAULT_PROXY_PORT;
+use voidns_core::{ipc, Controller};
+use voidns_proto::{Command, ConnState, Event, UpstreamSel, DEFAULT_PROXY_PORT};
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
@@ -24,11 +30,72 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    match std::env::args().nth(1).as_deref() {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
         Some("install") => install(),
         Some("uninstall") => uninstall(),
+        Some("connect") => {
+            ctl(Command::Connect {
+                upstream: parse_upstream(&args[2..])?,
+            })
+            .await
+        }
+        Some("disconnect") => ctl(Command::Disconnect).await,
+        Some("status") => ctl(Command::GetStatus).await,
         _ => run().await,
     }
+}
+
+/// Parse a CLI upstream spec into an [`UpstreamSel`].
+fn parse_upstream(args: &[String]) -> Result<UpstreamSel> {
+    match args.first().map(String::as_str) {
+        Some("cloudflare") => Ok(UpstreamSel::Cloudflare),
+        Some("google") => Ok(UpstreamSel::Google),
+        Some("quad9") => Ok(UpstreamSel::Quad9),
+        Some("voidns") => Ok(UpstreamSel::Voidns),
+        Some("custom") => Ok(UpstreamSel::Custom {
+            ip: args.get(1).context("custom: missing <ip>")?.clone(),
+            hostname: args.get(2).context("custom: missing <hostname>")?.clone(),
+            path: args.get(3).context("custom: missing <path>")?.clone(),
+            port: args
+                .get(4)
+                .context("custom: missing <port>")?
+                .parse()
+                .context("custom: invalid <port>")?,
+        }),
+        _ => bail!(
+            "usage: voidns-service connect <cloudflare|google|quad9|voidns|custom <ip> <hostname> <path> <port>>"
+        ),
+    }
+}
+
+/// Send one control command to the running daemon over IPC and report the reply.
+/// Exits non-zero if the daemon reports an error (or a non-connected state for a
+/// connect) so scripts can gate on it.
+async fn ctl(cmd: Command) -> Result<()> {
+    let connecting = matches!(cmd, Command::Connect { .. });
+    match ipc::one_shot(&cmd).await? {
+        Event::Status(s) => {
+            println!(
+                "state={:?} upstream={} listen={} error={}",
+                s.state,
+                s.upstream.as_deref().unwrap_or("-"),
+                s.listen.as_deref().unwrap_or("-"),
+                s.error.as_deref().unwrap_or("-"),
+            );
+            if matches!(s.state, ConnState::Error)
+                || (connecting && s.state != ConnState::Connected)
+            {
+                std::process::exit(1);
+            }
+        }
+        Event::Pong => println!("pong"),
+        Event::Error { message } => {
+            eprintln!("error: {message}");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
 }
 
 async fn run() -> Result<()> {

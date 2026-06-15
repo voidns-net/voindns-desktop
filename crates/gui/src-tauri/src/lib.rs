@@ -23,13 +23,6 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// True only in debug builds. The frontend uses this to show the simulated
-/// "Dev" provider, which is absent from release/runtime builds.
-#[tauri::command]
-fn is_dev() -> bool {
-    cfg!(debug_assertions)
-}
-
 /// Map a service reply to a command result. `Event::Error` becomes `Err`.
 fn into_status(reply: io::Result<Event>) -> Result<Status, String> {
     match reply {
@@ -122,7 +115,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_version,
-            is_dev,
             connect,
             disconnect,
             get_status

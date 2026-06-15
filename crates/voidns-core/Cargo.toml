@@ -18,7 +18,10 @@ interprocess = { workspace = true }
 bytes = { workspace = true }
 
 hickory-server = { version = "0.26", default-features = false, features = ["resolver", "https-ring"] }
-hickory-resolver = { version = "0.26", default-features = false, features = ["https-ring", "tokio", "webpki-roots"] }
+# DoH upstream TLS trusts the OS trust store (rustls-platform-verifier) rather
+# than a vendored Mozilla bundle: respects enterprise/user-added CAs, and lets
+# the CI e2e trust a locally-installed mock CA. (Was: webpki-roots.)
+hickory-resolver = { version = "0.26", default-features = false, features = ["https-ring", "tokio", "rustls-platform-verifier"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # systemd-resolved control over D-Bus (org.freedesktop.resolve1), blocking API.

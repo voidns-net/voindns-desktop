@@ -25,12 +25,21 @@ pub enum UpstreamSel {
     Google,
     Quad9,
     /// Arbitrary DoH endpoint. `ip` is the hardcoded bootstrap address,
-    /// `hostname` the TLS SNI / cert name, `path` the RFC 8484 query path.
+    /// `hostname` the TLS SNI / cert name, `path` the RFC 8484 query path,
+    /// `port` the TLS port (defaults to 443; overridable for local mock tests).
     Custom {
         ip: String,
         hostname: String,
         path: String,
+        #[serde(default = "default_doh_port")]
+        port: u16,
     },
+}
+
+/// Default DoH TLS port. Standalone so `#[serde(default)]` keeps older payloads
+/// (and the GUI's port-less custom entries) deserializing to 443.
+fn default_doh_port() -> u16 {
+    443
 }
 
 impl UpstreamSel {
