@@ -285,10 +285,26 @@ jobs:
           & $env:VOIDNS_CLI connect custom 127.0.0.1 localhost /dns-query $env:MOCK_PORT
           if ($LASTEXITCODE -ne 0) { throw "connect failed" }
           ipconfig /flushdns | Out-Null
+
+          # Diagnostics: confirm the redirect actually pointed the adapters at the
+          # proxy, and prove the proxy->mock path independently of the redirect.
+          Write-Host "---- DNS servers per interface ----"
+          Get-DnsClientServerAddress -AddressFamily IPv4 |
+            Where-Object { $_.ServerAddresses } |
+            Format-Table -AutoSize InterfaceAlias, ServerAddresses | Out-String | Write-Host
+          $direct = (Resolve-DnsName -Server 127.0.0.1 -Name example.com -Type A -DnsOnly -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Type -eq 'A' } | Select-Object -First 1).IPAddress
+          Write-Host "Direct proxy query (127.0.0.1) example.com => '$direct'"
+
+          # The real assertion: system resolver (no -Server) must flow through the
+          # redirect to the proxy and reach the mock.
           $ans = (Resolve-DnsName -Name example.com -Type A -DnsOnly -ErrorAction SilentlyContinue |
                   Where-Object { $_.Type -eq 'A' } | Select-Object -First 1).IPAddress
-          Write-Host "Resolve-DnsName example.com => '$ans'"
-          Write-Host "---- mock.log ----"; Get-Content "$env:GITHUB_WORKSPACE\mock.log"
+          Write-Host "System resolve example.com => '$ans'"
+          Write-Host "---- mock.log ----"; Get-Content "$env:GITHUB_WORKSPACE\mock.log" -EA SilentlyContinue
+          Write-Host "---- mock.err ----"; Get-Content "$env:GITHUB_WORKSPACE\mock.err" -EA SilentlyContinue
+          Write-Host "---- service.log ----"; Get-Content "$env:ProgramData\VoidNS\service.log" -EA SilentlyContinue
+
           if (-not (Select-String -Path "$env:GITHUB_WORKSPACE\mock.log" -Pattern '^QUERY=example.com' -Quiet)) {
             throw "FAIL: mock never received the query"
           }

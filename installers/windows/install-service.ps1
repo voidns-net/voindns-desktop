@@ -50,9 +50,21 @@ Stop-AndDelete
 Copy-Item -Force $srcSvc $svcBin
 if (Test-Path $srcCli) { Copy-Item -Force $srcCli $cliBin }
 
-# Register + start the service. `binPath` includes the `run` subcommand (daemon).
+# Register the service. `binPath` includes the `run` subcommand (daemon).
 & sc.exe create voidns binPath= "`"$svcBin`" run" start= auto DisplayName= "voidns" | Out-Host
 & sc.exe description voidns "voidns local DoH proxy and DNS redirector" | Out-Host
+
+# A LocalSystem service has no console, so the daemon's stdout is discarded.
+# Point it at a log file via a per-service environment block (REG_MULTI_SZ under
+# the service key, read by the SCM at start) so the service is diagnosable.
+$logDir = Join-Path $env:ProgramData 'VoidNS'
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$logFile = Join-Path $logDir 'service.log'
+$svcKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\voidns'
+New-ItemProperty -Path $svcKey -Name Environment -PropertyType MultiString -Force `
+  -Value @("VOIDNS_LOG_FILE=$logFile", "RUST_LOG=info,voidns_core=debug,hickory_resolver=debug,hickory_proto=debug") |
+  Out-Null
+
 & sc.exe start voidns | Out-Host
 
-Write-Host "voidns service installed to $InstallDir and started."
+Write-Host "voidns service installed to $InstallDir and started. Logs: $logFile"

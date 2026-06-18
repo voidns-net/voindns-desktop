@@ -26,11 +26,7 @@ use voidns_proto::{Command, ConnState, Event, UpstreamSel, DEFAULT_PROXY_PORT};
 mod winservice;
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    init_tracing();
 
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -42,6 +38,31 @@ fn main() -> Result<()> {
         Some("disconnect") => block_on(ctl(Command::Disconnect)),
         Some("status") => block_on(ctl(Command::GetStatus)),
         _ => run(),
+    }
+}
+
+/// Initialise tracing. A Windows service (or any daemon) has no console, so its
+/// stdout is lost — set `VOIDNS_LOG_FILE` to append logs to a file instead,
+/// which is the only way to diagnose the privileged daemon in the field.
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    match std::env::var_os("VOIDNS_LOG_FILE") {
+        Some(path) => {
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                Ok(file) => builder
+                    .with_ansi(false)
+                    .with_writer(move || file.try_clone().expect("clone log file handle"))
+                    .init(),
+                // Fall back to stdout if the file can't be opened.
+                Err(_) => builder.init(),
+            }
+        }
+        None => builder.init(),
     }
 }
 
