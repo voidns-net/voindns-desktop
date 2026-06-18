@@ -94,21 +94,26 @@ impl LinuxRedirector {
 
 impl super::DnsRedirector for LinuxRedirector {
     fn apply(&mut self, proxy: IpAddr) -> Result<()> {
+        // Prefer the systemd-resolved D-Bus path, but fall back to rewriting
+        // /etc/resolv.conf if it fails. The common failure is a link "managed"
+        // by systemd-networkd, where SetLinkDNS is refused with
+        // `org.freedesktop.resolve1.LinkBusy: Link <if> is managed` — the
+        // resolv.conf rewrite still points the libc resolver at our proxy.
         if resolved_active() {
-            let iface =
-                default_route_iface().context("could not determine default-route interface")?;
-            let ifindex = nix::net::if_::if_nametoindex(iface.as_str())
-                .with_context(|| format!("if_nametoindex({iface})"))?
-                as i32;
-            set_link_dns(ifindex, proxy)?;
-            set_link_default_route(ifindex, true)?;
-            info!(%iface, ifindex, "DNS redirected via systemd-resolved");
-            self.active = Active::Resolved { ifindex };
-        } else {
-            resolvconf_apply(proxy)?;
-            info!("DNS redirected via /etc/resolv.conf rewrite");
-            self.active = Active::ResolvConf;
+            match apply_resolved(proxy) {
+                Ok(ifindex) => {
+                    self.active = Active::Resolved { ifindex };
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!(error = %format!("{e:#}"),
+                          "systemd-resolved redirect failed; falling back to /etc/resolv.conf");
+                }
+            }
         }
+        resolvconf_apply(proxy)?;
+        info!("DNS redirected via /etc/resolv.conf rewrite");
+        self.active = Active::ResolvConf;
         Ok(())
     }
 
@@ -139,6 +144,18 @@ impl super::DnsRedirector for LinuxRedirector {
 
 fn resolved_active() -> bool {
     Path::new(RESOLVED_STUB).exists()
+}
+
+/// Redirect via systemd-resolved (SetLinkDNS + default route on the default
+/// link). Returns the targeted ifindex on success.
+fn apply_resolved(proxy: IpAddr) -> Result<i32> {
+    let iface = default_route_iface().context("could not determine default-route interface")?;
+    let ifindex = nix::net::if_::if_nametoindex(iface.as_str())
+        .with_context(|| format!("if_nametoindex({iface})"))? as i32;
+    set_link_dns(ifindex, proxy)?;
+    set_link_default_route(ifindex, true)?;
+    info!(%iface, ifindex, "DNS redirected via systemd-resolved");
+    Ok(ifindex)
 }
 
 /// Interface owning the default route (parsed from `/proc/net/route`).

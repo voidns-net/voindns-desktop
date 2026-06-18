@@ -22,28 +22,60 @@ use tracing_subscriber::EnvFilter;
 use voidns_core::{ipc, Controller};
 use voidns_proto::{Command, ConnState, Event, UpstreamSel, DEFAULT_PROXY_PORT};
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+#[cfg(windows)]
+mod winservice;
+
+fn main() -> Result<()> {
+    init_tracing();
 
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("install") => install(),
         Some("uninstall") => uninstall(),
-        Some("connect") => {
-            ctl(Command::Connect {
-                upstream: parse_upstream(&args[2..])?,
-            })
-            .await
-        }
-        Some("disconnect") => ctl(Command::Disconnect).await,
-        Some("status") => ctl(Command::GetStatus).await,
-        _ => run().await,
+        Some("connect") => block_on(ctl(Command::Connect {
+            upstream: parse_upstream(&args[2..])?,
+        })),
+        Some("disconnect") => block_on(ctl(Command::Disconnect)),
+        Some("status") => block_on(ctl(Command::GetStatus)),
+        _ => run(),
     }
+}
+
+/// Initialise tracing. A Windows service (or any daemon) has no console, so its
+/// stdout is lost — set `VOIDNS_LOG_FILE` to append logs to a file instead,
+/// which is the only way to diagnose the privileged daemon in the field.
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    match std::env::var_os("VOIDNS_LOG_FILE") {
+        Some(path) => {
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                Ok(file) => builder
+                    .with_ansi(false)
+                    .with_writer(move || file.try_clone().expect("clone log file handle"))
+                    .init(),
+                // Fall back to stdout if the file can't be opened.
+                Err(_) => builder.init(),
+            }
+        }
+        None => builder.init(),
+    }
+}
+
+/// Build a multi-thread Tokio runtime and drive `fut` to completion. Used for
+/// the foreground daemon and the one-shot control commands. (Not a
+/// `#[tokio::main]` because the Windows service path must own the runtime — it
+/// is created inside the SCM dispatcher thread, not around `main`.)
+fn block_on<F: std::future::Future<Output = Result<()>>>(fut: F) -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?
+        .block_on(fut)
 }
 
 /// Parse a CLI upstream spec into an [`UpstreamSel`].
@@ -98,7 +130,25 @@ async fn ctl(cmd: Command) -> Result<()> {
     Ok(())
 }
 
-async fn run() -> Result<()> {
+/// The `run` mode (daemon). On Windows, first try to attach to the Service
+/// Control Manager; if we were not launched by the SCM, fall through to
+/// foreground. Everywhere else: foreground until Ctrl-C / SIGTERM.
+fn run() -> Result<()> {
+    #[cfg(windows)]
+    {
+        if winservice::try_run_as_service()? {
+            return Ok(());
+        }
+    }
+    block_on(run_daemon(async {
+        let _ = tokio::signal::ctrl_c().await;
+    }))
+}
+
+/// The daemon proper: start the proxy + redirector + IPC server and serve until
+/// `shutdown` resolves (Ctrl-C in the foreground, the SCM Stop control under a
+/// Windows service), then restore DNS. Shared by both entry paths.
+pub(crate) async fn run_daemon(shutdown: impl std::future::Future<Output = ()>) -> Result<()> {
     let port = std::env::var("VOIDNS_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -113,10 +163,11 @@ async fn run() -> Result<()> {
         let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
     }
 
-    let server = voidns_core::ipc::serve(controller.clone());
+    let server = ipc::serve(controller.clone());
+    tokio::pin!(shutdown);
     tokio::select! {
         res = server => res?,
-        _ = tokio::signal::ctrl_c() => {
+        _ = &mut shutdown => {
             tracing::info!("shutdown signal received; restoring DNS");
             controller.lock().await.disconnect().await;
         }

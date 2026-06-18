@@ -42,6 +42,26 @@
   const tauriAvailable = backend.isTauri();
   const usesBackend = () => tauriAvailable;
 
+  // Per-OS remediation when the service is missing/unreachable. The service is
+  // auto-installed by the platform installer (NSIS on Windows, pkg on macOS,
+  // .deb/install-dev.sh on Linux), so the hint must NOT hardcode the Linux sudo
+  // command on every platform (the bug this replaces).
+  type OS = "windows" | "macos" | "linux";
+  function detectOS(): OS {
+    const ua =
+      typeof navigator !== "undefined" ? navigator.userAgent.toLowerCase() : "";
+    if (ua.includes("win")) return "windows";
+    if (ua.includes("mac")) return "macos";
+    return "linux";
+  }
+  const os: OS = detectOS();
+  const installHint =
+    os === "windows"
+      ? "reinstall VoidNS Client to register the service"
+      : os === "macos"
+        ? "reinstall VoidNS Client to install the helper"
+        : "sudo installers/linux/install-dev.sh";
+
   function upstreamFor(id: string): UpstreamSel {
     switch (id) {
       case "voidns": return { kind: "voidns" };
@@ -471,7 +491,7 @@
     {#if err && (connError === "NO SERVICE" || connError === "NEEDS ROOT")}
       <div class="status-hint">
         {connError === "NO SERVICE" ? "service not running" : "service needs root"} —
-        <span>sudo installers/linux/install-dev.sh</span>
+        <span>{installHint}</span>
       </div>
     {:else if err && connError && connError !== "TOKEN REQUIRED"}
       <div class="status-hint" title={errorDetail ?? ""}>{errorDetail ?? connError}</div>

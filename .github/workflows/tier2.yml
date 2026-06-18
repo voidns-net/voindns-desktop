@@ -1,0 +1,137 @@
+name: tier2
+
+# Tier 2 — the heavy, less-hermetic suites kept out of the fast tier1 (ci.yml):
+#
+#   * mock-doh   : the local mock-DoH cargo test (needs the node mock), 3 OS.
+#   * e2e-*      : the real thing — run the actual installer (NO GUI) on each OS,
+#                  which fully installs + starts the privileged service, then use
+#                  the shipped `voidns` CLI (the terminal twin of the GUI) to
+#                  connect to a local mock DoH, resolve a name through the SYSTEM
+#                  resolver, and assert the query reached the mock:
+#                     a. install app (real installer script)
+#                     b. `voidns connect …`           (CLI → service over IPC)
+#                     c. system DNS resolve command    (dig / dscacheutil / Resolve-DnsName)
+#                     d. mock server catches the query
+#   * installers : build the Tauri bundles (+ sidecar service/CLI) per OS.
+#   * publish    : push the installers to VPS1 on main.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: tier2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The hermetic local mock-DoH cargo test (moved here from tier1): install the
+  # node mock deps so doh_local actually runs (instead of skipping) on all 3 OS.
+  mock-doh:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install local DoH mock deps
+        working-directory: crates/voidns-core/tests/doh-mock
+        run: npm ci || npm install
+      - name: test (mock-DoH now runs, not skipped)
+        run: cargo test --workspace --locked
+
+  # Installers / artifacts: build the Tauri bundle (which now also ships the
+  # privileged service + the `voidns` CLI as sidecars) per OS and upload them.
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Linux GUI build deps (WebKitGTK)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev file
+
+      - name: Build GUI installer (Tauri bundle — stages service + CLI sidecars)
+        working-directory: crates/gui
+        shell: bash
+        run: |
+          npm ci || npm install
+          case "${{ matrix.os }}" in
+            ubuntu-latest)  npx tauri build --bundles deb,appimage ;;
+            windows-latest) npx tauri build --bundles msi,nsis ;;
+            macos-latest)   npx tauri build --bundles app,dmg ;;
+          esac
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          find crates/gui/src-tauri/target/release/bundle -type f \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \
+               -o -name '*.msi' -o -name '*.exe' -o -name '*.dmg' \) \
+            -exec cp -r {} dist/ \; 2>/dev/null || true
+          cp target/release/voidns-service* dist/ 2>/dev/null || true
+          cp target/release/voidns dist/ 2>/dev/null || true
+          cp target/release/voidns.exe dist/ 2>/dev/null || true
+          cp -r installers dist/installers 2>/dev/null || true
+          ls -la dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: voidns-${{ matrix.os }}
+          path: dist/**
+          if-no-files-found: warn
+
+  # Publish the per-OS installers to VPS1, where nginx serves them at
+  # voidns.net/downloads (the frontend + bot link there instead of GitHub releases).
+  publish:
+    needs: installers
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts            # → artifacts/voidns-<os>/...
+
+      - name: Rename installers to the stable names the web client expects
+        shell: bash
+        run: |
+          mkdir -p publish
+          find artifacts -name '*.msi'      -exec cp {} publish/VoidNS-Client-x64.msi \;
+          find artifacts -name '*.dmg'      -exec cp {} publish/VoidNS-Client.dmg \;
+          find artifacts -name '*.deb'      -exec cp {} publish/VoidNS-Client-amd64.deb \;
+          find artifacts -name '*.AppImage' -exec cp {} publish/VoidNS-Client-x86_64.AppImage \;
+          ls -la publish
+
+      - name: Push installers to VPS1 (nginx /downloads)
+        env:
+          SSH_KEY: ${{ secrets.VPS1_SSH_KEY }}
+          VPS1_HOST: ${{ secrets.VPS1_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          SSH_OPTS="-o StrictHostKeyChecking=accept-new -i $HOME/.ssh/id_ed25519"
+          ssh $SSH_OPTS "$VPS1_HOST" 'mkdir -p /opt/voidns/infra/downloads'
+          scp $SSH_OPTS publish/* "$VPS1_HOST:/opt/voidns/infra/downloads/"

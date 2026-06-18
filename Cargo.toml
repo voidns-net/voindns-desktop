@@ -4,6 +4,7 @@ members = [
     "crates/voidns-proto",
     "crates/voidns-core",
     "crates/voidns-service",
+    "crates/voidns-cli",
 ]
 # crates/gui/src-tauri is built via `cargo tauri` from crates/gui and kept out
 # of the library workspace so `cargo build` here stays headless-friendly.

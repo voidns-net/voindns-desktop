@@ -10,6 +10,7 @@ set -euo pipefail
 APP=voidns
 UNIT=$APP.service
 BIN_DST=/usr/lib/$APP/voidns-service
+CLI_DST=/usr/bin/voidns
 UNIT_DST=/etc/systemd/system/$UNIT
 
 SUDO=""
@@ -21,6 +22,7 @@ $SUDO systemctl disable "$UNIT" 2>/dev/null || true
 
 $SUDO rm -f "$UNIT_DST"
 $SUDO rm -f "$BIN_DST"
+$SUDO rm -f "$CLI_DST"
 $SUDO rmdir /usr/lib/$APP 2>/dev/null || true
 $SUDO systemctl daemon-reload
 

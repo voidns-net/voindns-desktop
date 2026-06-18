@@ -1,0 +1,24 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Tray/menubar mark: transparent background, just the VoidNS core emblem so
+       it reads at 16–32px next to other tray icons. Cyan #00c8ff on transparent. -->
+  <defs>
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#aef0ff"/>
+      <stop offset="35%" stop-color="#00c8ff"/>
+      <stop offset="100%" stop-color="#00c8ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g transform="translate(128,128) scale(1.15) translate(-100,-100)">
+    <circle cx="100" cy="100" r="82" fill="none" stroke="#00c8ff" stroke-width="6" opacity="0.9"/>
+    <circle cx="100" cy="100" r="58" fill="none" stroke="#00c8ff" stroke-width="5" stroke-dasharray="46 26" opacity="0.85"/>
+    <circle cx="100" cy="100" r="30" fill="none" stroke="#00c8ff" stroke-width="6" opacity="0.95"/>
+    <g fill="#00c8ff">
+      <circle cx="100" cy="42" r="7"/>
+      <circle cx="150.2" cy="129" r="7"/>
+      <circle cx="49.8" cy="129" r="7"/>
+    </g>
+    <circle cx="100" cy="100" r="26" fill="url(#coreGlow)"/>
+    <circle cx="100" cy="100" r="11" fill="#00c8ff"/>
+    <circle cx="100" cy="100" r="4.5" fill="#ffffff"/>
+  </g>
+</svg>

@@ -4,6 +4,7 @@
 set -e
 
 install -Dm755 voidns-service /usr/lib/voidns/voidns-service
+[ -f voidns ] && install -Dm755 voidns /usr/bin/voidns
 install -Dm644 voidns.service /etc/systemd/system/voidns.service
 
 systemctl daemon-reload
