@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "net.voidns.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run stage:bins && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run stage:bins && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "VoidNS Client",
-        "width": 420,
-        "height": 620,
+        "width": 350,
+        "height": 540,
         "resizable": false,
         "center": true,
         "decorations": false,
@@ -36,6 +36,12 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "externalBin": ["binaries/voidns-service", "binaries/voidns"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "../../installers/windows/install-service.nsh"
+      }
+    }
   }
 }

@@ -5,3 +5,6 @@ dist
 # Rust / Tauri
 src-tauri/target
 src-tauri/gen
+
+# Staged sidecar binaries (service + CLI), produced by scripts/stage-bins.mjs
+src-tauri/binaries

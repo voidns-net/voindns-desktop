@@ -1,0 +1,24 @@
+[package]
+name = "voidns-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "VoidNS command-line client — drives the privileged voidns-service over IPC, exactly like the GUI."
+
+# The shipped CLI binary is `voidns` (the GUI is `voidns-gui`). Installed
+# alongside the GUI so the service can be driven from a terminal / scripts.
+[[bin]]
+name = "voidns"
+path = "src/main.rs"
+
+[dependencies]
+# Unprivileged client: like the GUI, it depends ONLY on the shared protocol
+# types and a tiny IPC client — NOT voidns-core (no proxy/redirect/privileged
+# deps). The framing here is byte-for-byte identical to the GUI's src/ipc.rs.
+voidns-proto = { workspace = true }
+interprocess = { version = "2", features = ["tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net", "time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
