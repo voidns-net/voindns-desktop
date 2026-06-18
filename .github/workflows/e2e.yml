@@ -7,7 +7,7 @@ name: e2e
 #   4. voidns connect custom 127.0.0.1 mock.voidns.test /dns-query <port>
 #   5. fire a DNS query at the proxy
 #   6. assert it reached the TypeScript mock DoH server
-# The harness lives in e2e/ (see e2e/src/run.ts).
+# Runs on GitHub-hosted runners (repo is public → free standard runners).
 
 on:
   push:
@@ -16,7 +16,6 @@ on:
     paths:
       - "crates/**"
       - "e2e/**"
-      - "ci/**"
       - ".github/workflows/e2e.yml"
   workflow_dispatch:
 
@@ -24,24 +23,8 @@ permissions:
   contents: read
 
 jobs:
-  # Linux RPM e2e on the self-hosted VPS1 runner. checkout runs natively; the
-  # build + real rpm install + DNS-through-proxy assertion run in an explicit
-  # `docker run fedora` (workspace bind-mounted at the same path).
-  linux-rpm:
-    runs-on: [self-hosted, linux, vps1]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build RPM + run installer e2e in Fedora container
-        run: |
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE":"$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
-            fedora:40 bash ci/fedora-e2e.sh
-
-  # Windows NSIS e2e — gated until a self-hosted Windows runner exists
-  # (set repo variable HAS_WINDOWS_RUNNER=true). Skipped, not queued, otherwise.
   windows:
-    if: ${{ vars.HAS_WINDOWS_RUNNER == 'true' }}
-    runs-on: [self-hosted, windows]
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -64,6 +47,44 @@ jobs:
         working-directory: e2e
         env:
           BUNDLE_DIR: ${{ github.workspace }}/crates/gui/src-tauri/target/release/bundle/nsis
+        run: |
+          npm ci
+          npm run e2e:install
+
+  # Real Fedora environment: build the .rpm, install it, run the DNS-through-proxy
+  # assertion. Containers have no PID1 systemd, so %post `systemctl enable --now`
+  # is a no-op and the harness launches the installed service binary itself.
+  linux-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:40
+    steps:
+      - name: Install distro deps
+        run: |
+          dnf install -y \
+            git nodejs npm gcc gcc-c++ make file which curl tar xz rpm-build systemd \
+            webkit2gtk4.1-devel gtk3-devel librsvg2-devel \
+            libappindicator-gtk3-devel openssl-devel
+
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build service + CLI
+        run: cargo build --release -p voidns-service -p voidns-cli
+      - name: Stage sidecars
+        run: node crates/gui/scripts/stage-sidecars.mjs
+      - name: Build RPM installer
+        working-directory: crates/gui
+        run: |
+          npm ci
+          npm run tauri -- build --bundles rpm
+
+      - name: Run installer e2e (root)
+        working-directory: e2e
+        env:
+          BUNDLE_DIR: ${{ github.workspace }}/crates/gui/src-tauri/target/release/bundle/rpm
+          E2E_ALLOW_MANUAL_START: "1"
         run: |
           npm ci
           npm run e2e:install
