@@ -1,0 +1,20 @@
+[Unit]
+Description=VoidNS privileged DNS service
+Documentation=https://github.com/voidns
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+# The daemon signals readiness via sd_notify (see voidns-service run_daemon).
+Type=notify
+# Sidecar binary installed by the RPM (Tauri externalBin -> /usr/bin).
+ExecStart=/usr/bin/voidns-service run
+Restart=always
+RestartSec=1
+# Creates /run/voidns (root-owned) for the control socket before start.
+RuntimeDirectory=voidns
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

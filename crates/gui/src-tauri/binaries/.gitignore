@@ -1,0 +1,5 @@
+# Tauri externalBin sidecars are staged here at build time (see installers.yml /
+# e2e.yml: cargo build -> rename with the host target triple). Not committed.
+voidns-service-*
+voidns-*
+!.gitignore
