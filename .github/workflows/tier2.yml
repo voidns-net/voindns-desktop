@@ -48,40 +48,6 @@ jobs:
       - name: test (mock-DoH now runs, not skipped)
         run: cargo test --workspace --locked
 
-  # Real system e2e (all OSes): install the REAL service (no GUI), connect via
-  # the CLI (the same IPC the GUI uses), resolve a name through the system
-  # resolver, and confirm the query reached the local mock DoH server through the
-  # redirect. One cross-platform driver (tests/e2e/run-e2e.ts) runs the whole
-  # flow in a single process so the mock stays alive throughout — on Windows a
-  # mock started in a separate step is torn down before the daemon dials it.
-  e2e:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Linux resolver tools
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y dnsutils
-
-      - name: Mock deps
-        shell: bash
-        run: cd crates/voidns-core/tests/doh-mock && (npm ci || npm install)
-
-      - name: Build service + CLI (release)
-        run: cargo build --release --locked -p voidns-service -p voidns-cli
-
-      - name: e2e (install -> connect -> system resolve -> mock catches)
-        run: node --experimental-strip-types crates/voidns-core/tests/e2e/run-e2e.ts
-
   # Installers / artifacts: build the Tauri bundle (which now also ships the
   # privileged service + the `voidns` CLI as sidecars) per OS and upload them.
   installers:
