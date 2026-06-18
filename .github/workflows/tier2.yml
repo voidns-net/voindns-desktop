@@ -69,7 +69,7 @@ jobs:
           sudo apt-get install -y dnsutils
           (cd crates/voidns-core/tests/doh-mock && (npm ci || npm install))
 
-      - name: Generate + trust mock CA
+      - name: Generate mock CA + place it for the proxy
         run: |
           set -euo pipefail
           mkdir -p e2e-certs && cd e2e-certs
@@ -78,8 +78,11 @@ jobs:
           openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=localhost"
           openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
             -out leaf.crt -days 2 -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
-          sudo cp ca.crt /usr/local/share/ca-certificates/voidns-e2e.crt
-          sudo update-ca-certificates
+          # The proxy uses an offline rustls store + this extra-CA file (NOT the
+          # OS trust store), so the redirected system DNS can't deadlock the
+          # upstream cert check. Drop the CA where the daemon reads it.
+          sudo mkdir -p /etc/voidns
+          sudo cp ca.crt /etc/voidns/extra-ca.pem
 
       - name: Start mock DoH server
         run: |
@@ -150,7 +153,7 @@ jobs:
       - name: Build service + CLI (release)
         run: cargo build --release --locked -p voidns-service -p voidns-cli
 
-      - name: Generate + trust mock CA
+      - name: Generate mock CA + place it for the proxy
         run: |
           set -euo pipefail
           mkdir -p e2e-certs && cd e2e-certs
@@ -159,8 +162,9 @@ jobs:
           openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=localhost"
           openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
             -out leaf.crt -days 2 -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
-          sudo security add-trusted-cert -d -r trustRoot \
-            -k /Library/Keychains/System.keychain ca.crt
+          # Offline rustls trust + extra-CA file (not the OS keychain): see e2e-linux.
+          sudo mkdir -p /etc/voidns
+          sudo cp ca.crt /etc/voidns/extra-ca.pem
 
       - name: Start mock DoH server
         run: |
@@ -243,17 +247,18 @@ jobs:
           openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
             -out leaf.crt -days 2 -extfile san.cnf
 
-      - name: Trust mock CA (LocalMachine Root store)
+      - name: Place mock CA for the proxy
         shell: pwsh
         run: |
-          # The daemon runs as the LocalSystem service, which validates upstream
-          # DoH certs against the LocalMachine root store (via
-          # rustls-platform-verifier). certutil's default store can land in the
-          # current user's store, which SYSTEM does not read — so import
-          # explicitly into Cert:\LocalMachine\Root.
-          Import-Certificate -FilePath "$env:GITHUB_WORKSPACE\e2e-certs\ca.crt" `
-            -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-          Write-Host "Imported mock CA into LocalMachine\Root"
+          # The daemon uses an offline rustls store + this extra-CA file, NOT the
+          # Windows cert store. That's deliberate: the OS verifier does network
+          # lookups (CRL/CTL) that would recurse through the redirected system DNS
+          # — the proxy that is mid-handshake — and deadlock. Drop the CA where the
+          # daemon reads it (%ProgramData%\VoidNS\extra-ca.pem).
+          $dir = Join-Path $env:ProgramData 'VoidNS'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\e2e-certs\ca.crt" (Join-Path $dir 'extra-ca.pem') -Force
+          Write-Host "Placed mock CA at $dir\extra-ca.pem"
 
       - name: Start mock DoH server
         shell: pwsh

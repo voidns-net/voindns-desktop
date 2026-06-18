@@ -62,7 +62,7 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logFile = Join-Path $logDir 'service.log'
 $svcKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\voidns'
 New-ItemProperty -Path $svcKey -Name Environment -PropertyType MultiString -Force `
-  -Value @("VOIDNS_LOG_FILE=$logFile", "RUST_LOG=info,voidns_core=debug,hickory_resolver=debug,hickory_proto=debug") |
+  -Value @("VOIDNS_LOG_FILE=$logFile", "RUST_LOG=info,voidns_core=debug") |
   Out-Null
 
 & sc.exe start voidns | Out-Host

@@ -18,10 +18,22 @@ interprocess = { workspace = true }
 bytes = { workspace = true }
 
 hickory-server = { version = "0.26", default-features = false, features = ["resolver", "https-ring"] }
-# DoH upstream TLS trusts the OS trust store (rustls-platform-verifier) rather
-# than a vendored Mozilla bundle: respects enterprise/user-added CAs, and lets
-# the CI e2e trust a locally-installed mock CA. (Was: webpki-roots.)
-hickory-resolver = { version = "0.26", default-features = false, features = ["https-ring", "tokio", "rustls-platform-verifier"] }
+hickory-resolver = { version = "0.26", default-features = false, features = ["https-ring", "tokio", "webpki-roots"] }
+
+# Upstream DoH TLS uses an explicit, *offline* rustls trust store (webpki-roots,
+# the Mozilla bundle) instead of the OS verifier (rustls-platform-verifier).
+# This is deliberate: when we redirect the system DNS to our own proxy, the
+# Windows OS cert verifier's own lookups (CRL/CTL/connectivity probes to
+# crl.microsoft.com etc.) would recurse back through the proxy that is *mid*
+# handshake — a bootstrap deadlock that ServFails every upstream connection.
+# An offline verifier never touches the network. We build the ClientConfig
+# ourselves (see proxy.rs) so we can also add a private CA via
+# VOIDNS_EXTRA_CA_FILE — used by the CI e2e to trust its mock DoH server, and
+# usable for enterprise split-DNS with an internal DoH endpoint.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
+rustls-pemfile = "2"
+async-trait = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # systemd-resolved control over D-Bus (org.freedesktop.resolve1), blocking API.
@@ -46,9 +58,8 @@ core-foundation = "0.9"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "process"] }
-# Hermetic DoH test: generate a cert for the local mock and trust it via a
-# programmatic RootCertStore. rustls is pinned to hickory's version (0.23, ring)
-# so the ClientConfig type unifies with ResolverBuilder::with_tls_config.
-rcgen = "0.13"
-rustls = "0.23"
-hickory-resolver = { version = "0.26", default-features = false, features = ["https-ring", "tokio"] }
+# Hermetic DoH test (doh_local.rs) generates a self-signed cert for its in-proc
+# mock. ring backend (not the default aws_lc_rs) to match the proxy's ring
+# crypto provider and keep the C toolchain out of the tree. rustls +
+# hickory-resolver are normal deps now, so the test reaches them directly.
+rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
