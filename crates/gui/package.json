@@ -8,7 +8,6 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "stage:bins": "node scripts/stage-bins.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -1,11 +1,10 @@
 name: ci
 
 # Tier 1 — the simplest, fastest, fully hermetic checks: lint + build + the
-# unit/IPC tests that need no network and no external mock. The heavier suites
-# (local mock-DoH test, real install→resolve e2e, installer bundles, publish)
-# live in tier2.yml. The mock-DoH-dependent cargo tests (doh_local, proxy_doh)
-# still *compile* here but skip at runtime because the node mock deps are not
-# installed — so tier1 stays green and quick.
+# unit/IPC tests that need no network and no external mock. The heavier mock-DoH
+# suite lives in tier2.yml. The mock-DoH-dependent cargo tests (doh_local,
+# proxy_doh) still *compile* here but skip at runtime because the node mock deps
+# are not installed — so tier1 stays green and quick.
 
 on:
   push:

@@ -2,13 +2,11 @@
 //! DNS redirector and serves the GUI over local IPC.
 //!
 //! This is the elevated half of the split-privilege design (mirrors AmneziaVPN):
-//! installed once as a root systemd unit, it does the privileged DNS work so the
-//! unprivileged GUI never needs root — it just sends commands over the local
-//! socket. See installers/linux/voidns.service + install-dev.sh.
+//! run as a root daemon, it does the privileged DNS work so the unprivileged GUI
+//! never needs root — it just sends commands over the local socket.
 //!
 //! Modes (argv[1]):
 //!   * `run` (default, foreground) — the daemon: proxy + redirector + IPC server.
-//!   * `install` / `uninstall` — installer hints.
 //!   * `connect <upstream>` / `disconnect` / `status` — control an already-running
 //!     daemon over IPC (the same commands the GUI sends). Lets the service be
 //!     driven from a terminal / script. `<upstream>` is one of
@@ -30,8 +28,6 @@ fn main() -> Result<()> {
 
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("install") => install(),
-        Some("uninstall") => uninstall(),
         Some("connect") => block_on(ctl(Command::Connect {
             upstream: parse_upstream(&args[2..])?,
         })),
@@ -172,20 +168,5 @@ pub(crate) async fn run_daemon(shutdown: impl std::future::Future<Output = ()>) 
             controller.lock().await.disconnect().await;
         }
     }
-    Ok(())
-}
-
-fn install() -> Result<()> {
-    println!(
-        "Service installation is performed by the platform installer:\n\
-         - Linux:   installers/linux/install-dev.sh  (or the .deb/.rpm postinst)\n\
-         - Windows: installers/windows  (sc create / NSIS hook)\n\
-         - macOS:   installers/macos    (LaunchDaemon + pkg postinstall)\n"
-    );
-    Ok(())
-}
-
-fn uninstall() -> Result<()> {
-    println!("Use the platform package manager / installer to remove the voidns service.");
     Ok(())
 }

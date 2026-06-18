@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "net.voidns.desktop",
   "build": {
-    "beforeDevCommand": "npm run stage:bins && npm run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run stage:bins && npm run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -27,8 +27,7 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": ["deb", "appimage"],
+    "active": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -36,12 +35,6 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/icon.png"
-    ],
-    "externalBin": ["binaries/voidns-service", "binaries/voidns"],
-    "windows": {
-      "nsis": {
-        "installerHooks": "../../../installers/windows/install-service.nsh"
-      }
-    }
+    ]
   }
 }

@@ -21,10 +21,11 @@ GUI **непривилегированный**. Привилегированну
 AdGuard/Mullvad/NextDNS уходят как `UpstreamSel::Custom { ip, hostname, path }`,
 VoidNS — как `UpstreamSel::Voidns` (токен-гейт — пока UI-гейтинг).
 
-**Установка сервиса (один раз, нужен sudo):**
+**Запуск сервиса (нужен root для `:53` и смены DNS):**
 
 ```bash
-installers/linux/install-dev.sh     # собирает voidns-service + ставит root systemd-юнит
+cargo build --release -p voidns-service
+sudo ./target/release/voidns-service run     # фоновый root-демон
 ```
 
 После этого запускай GUI **без рута**:
@@ -33,9 +34,8 @@ installers/linux/install-dev.sh     # собирает voidns-service + став
 cd crates/gui && ./run.sh
 ```
 
-Снять сервис: `installers/linux/uninstall-dev.sh`. Если сервис не установлен,
-кнопка Connect покажет **NO SERVICE** с подсказкой; пока он крутится
-непривилегированно — **NEEDS ROOT**.
+Если сервис не запущен, кнопка Connect покажет **NO SERVICE** с подсказкой; пока
+он крутится непривилегированно — **NEEDS ROOT**.
 
 ### Провайдер «Dev»
 
@@ -75,13 +75,7 @@ npm run tauri build -- --no-bundle
 ./src-tauri/target/release/voidns-gui
 ```
 
-## Сборка релиза (.deb + AppImage)
-
-```bash
-npm run tauri build
-```
-
-Артефакты: `src-tauri/target/release/bundle/`.
+Упаковка в инсталлеры (`bundle`) отключена — собирается только сам бинарь GUI.
 
 ## Структура
 
@@ -101,5 +95,4 @@ crates/gui/
 ```
 
 Привилегированный сервис: `crates/voidns-service` (запускает
-`voidns-core::ipc::serve` с `Controller`); systemd-юнит и скрипты —
-`installers/linux/` (`voidns.service`, `install-dev.sh`, `uninstall-dev.sh`).
+`voidns-core::ipc::serve` с `Controller`) — запускается как root-демон вручную.

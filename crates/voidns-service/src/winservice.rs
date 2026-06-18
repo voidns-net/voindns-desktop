@@ -1,8 +1,8 @@
 //! Windows Service Control Manager (SCM) integration.
 //!
-//! When the daemon is launched by the SCM (`sc start voidns`, or the GUI's NSIS
-//! installer hook), Windows expects the process to speak the service-control
-//! protocol — register a control handler and report `Running` — within ~30s, or
+//! When the daemon is launched by the SCM (`sc start voidns`), Windows expects
+//! the process to speak the service-control protocol — register a control
+//! handler and report `Running` — within ~30s, or
 //! it fails the start with error 1053. A plain console binary never does this,
 //! so without this module `sc start` times out and the service never actually
 //! runs. Here we register the handler, report `Running`, then drive the same

@@ -18,9 +18,8 @@ crates/
     redirect/          system DNS redirect per OS (linux/windows/macos)
     controller.rs      Connect/Disconnect state machine
     ipc.rs             GUI↔service local-socket protocol
-  voidns-service/   privileged daemon binary (run|install|uninstall)
+  voidns-service/   privileged daemon binary (run|connect|disconnect|status)
 gui/                 Tauri 2 + SvelteKit app (ConnectButton, status)
-installers/          systemd unit / launchd plist / NSIS hook
 ```
 
 ## Status (MVP)
