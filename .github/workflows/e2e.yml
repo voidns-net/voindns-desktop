@@ -16,6 +16,7 @@ on:
     paths:
       - "crates/**"
       - "e2e/**"
+      - "ci/**"
       - ".github/workflows/e2e.yml"
   workflow_dispatch:
 
@@ -23,46 +24,18 @@ permissions:
   contents: read
 
 jobs:
-  # Linux RPM e2e on the self-hosted VPS1 runner, inside a Fedora container.
+  # Linux RPM e2e on the self-hosted VPS1 runner. checkout runs natively; the
+  # build + real rpm install + DNS-through-proxy assertion run in an explicit
+  # `docker run fedora` (workspace bind-mounted at the same path).
   linux-rpm:
     runs-on: [self-hosted, linux, vps1]
-    container:
-      image: fedora:40
-      # Need a writable cgroup for any systemd interaction; harmless otherwise.
-      options: --privileged
     steps:
-      - name: Install distro deps
-        run: |
-          dnf install -y \
-            git nodejs npm gcc gcc-c++ make file which curl tar xz \
-            rpm-build systemd \
-            webkit2gtk4.1-devel gtk3-devel librsvg2-devel \
-            libappindicator-gtk3-devel openssl-devel
-
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build service + CLI
-        run: cargo build --release -p voidns-service -p voidns-cli
-      - name: Stage sidecars
-        run: node crates/gui/scripts/stage-sidecars.mjs
-      - name: Build RPM installer
-        working-directory: crates/gui
+      - name: Build RPM + run installer e2e in Fedora container
         run: |
-          npm ci
-          npm run tauri -- build --bundles rpm
-
-      - name: Run installer e2e (root)
-        working-directory: e2e
-        env:
-          BUNDLE_DIR: ${{ github.workspace }}/crates/gui/src-tauri/target/release/bundle/rpm
-          # Containers have no PID1 systemd, so the %post `systemctl enable --now`
-          # is a no-op; the harness then launches the *installed* service binary.
-          E2E_ALLOW_MANUAL_START: "1"
-        run: |
-          npm ci
-          npm run e2e:install
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":"$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            fedora:40 bash ci/fedora-e2e.sh
 
   # Windows NSIS e2e — gated until a self-hosted Windows runner exists
   # (set repo variable HAS_WINDOWS_RUNNER=true). Skipped, not queued, otherwise.
