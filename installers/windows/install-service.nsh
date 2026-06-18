@@ -1,5 +1,6 @@
-; NSIS installer hook for the Tauri bundle. Wired via tauri.conf.json:
-;   bundle.windows.nsis.installerHooks = "../../installers/windows/install-service.nsh"
+; NSIS installer hook for the Tauri bundle. Wired via tauri.conf.json (path is
+; relative to src-tauri):
+;   bundle.windows.nsis.installerHooks = "../../../installers/windows/install-service.nsh"
 ; Runs elevated during install: registers and starts the voidns service so the
 ; user never has to install it by hand (the bug this fixes: on Windows the
 ; service was never registered, so the GUI showed "NO SERVICE").

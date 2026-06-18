@@ -40,7 +40,7 @@
     "externalBin": ["binaries/voidns-service", "binaries/voidns"],
     "windows": {
       "nsis": {
-        "installerHooks": "../../installers/windows/install-service.nsh"
+        "installerHooks": "../../../installers/windows/install-service.nsh"
       }
     }
   }
