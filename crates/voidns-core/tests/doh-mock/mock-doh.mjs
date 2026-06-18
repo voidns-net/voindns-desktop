@@ -84,6 +84,19 @@ function start(certPath, keyPath, port = 0) {
     process.exit(1)
   })
 
+  // A failed TLS handshake (e.g. the DoH client rejecting our cert) is otherwise
+  // silent. Surface it so the e2e can tell "client never connected" apart from
+  // "client connected but distrusted the cert".
+  server.on('tlsClientError', (err, sock) => {
+    process.stderr.write(`tlsClientError from ${sock.remoteAddress}: ${err.message}\n`)
+  })
+  server.on('clientError', (err, sock) => {
+    process.stderr.write(`clientError: ${err.message}\n`)
+    try {
+      sock.destroy()
+    } catch {}
+  })
+
   server.listen(port, '127.0.0.1', () => {
     const addr = server.address()
     process.stdout.write(`PORT=${addr.port}\n`)

@@ -243,9 +243,17 @@ jobs:
           openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
             -out leaf.crt -days 2 -extfile san.cnf
 
-      - name: Trust mock CA (Root store)
+      - name: Trust mock CA (LocalMachine Root store)
         shell: pwsh
-        run: certutil -addstore -f Root "$env:GITHUB_WORKSPACE\e2e-certs\ca.crt"
+        run: |
+          # The daemon runs as the LocalSystem service, which validates upstream
+          # DoH certs against the LocalMachine root store (via
+          # rustls-platform-verifier). certutil's default store can land in the
+          # current user's store, which SYSTEM does not read — so import
+          # explicitly into Cert:\LocalMachine\Root.
+          Import-Certificate -FilePath "$env:GITHUB_WORKSPACE\e2e-certs\ca.crt" `
+            -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Write-Host "Imported mock CA into LocalMachine\Root"
 
       - name: Start mock DoH server
         shell: pwsh
