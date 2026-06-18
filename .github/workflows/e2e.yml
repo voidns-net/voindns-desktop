@@ -23,38 +23,13 @@ permissions:
   contents: read
 
 jobs:
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Build service + CLI
-        run: cargo build --release -p voidns-service -p voidns-cli
-      - name: Stage sidecars
-        run: node crates/gui/scripts/stage-sidecars.mjs
-      - name: Build NSIS installer
-        working-directory: crates/gui
-        run: |
-          npm ci
-          npm run tauri -- build --bundles nsis
-
-      - name: Run installer e2e
-        working-directory: e2e
-        env:
-          BUNDLE_DIR: ${{ github.workspace }}/crates/gui/src-tauri/target/release/bundle/nsis
-        run: |
-          npm ci
-          npm run e2e:install
-
+  # Linux RPM e2e on the self-hosted VPS1 runner, inside a Fedora container.
   linux-rpm:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, vps1]
     container:
       image: fedora:40
+      # Need a writable cgroup for any systemd interaction; harmless otherwise.
+      options: --privileged
     steps:
       - name: Install distro deps
         run: |
@@ -85,6 +60,37 @@ jobs:
           # Containers have no PID1 systemd, so the %post `systemctl enable --now`
           # is a no-op; the harness then launches the *installed* service binary.
           E2E_ALLOW_MANUAL_START: "1"
+        run: |
+          npm ci
+          npm run e2e:install
+
+  # Windows NSIS e2e — gated until a self-hosted Windows runner exists
+  # (set repo variable HAS_WINDOWS_RUNNER=true). Skipped, not queued, otherwise.
+  windows:
+    if: ${{ vars.HAS_WINDOWS_RUNNER == 'true' }}
+    runs-on: [self-hosted, windows]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build service + CLI
+        run: cargo build --release -p voidns-service -p voidns-cli
+      - name: Stage sidecars
+        run: node crates/gui/scripts/stage-sidecars.mjs
+      - name: Build NSIS installer
+        working-directory: crates/gui
+        run: |
+          npm ci
+          npm run tauri -- build --bundles nsis
+
+      - name: Run installer e2e
+        working-directory: e2e
+        env:
+          BUNDLE_DIR: ${{ github.workspace }}/crates/gui/src-tauri/target/release/bundle/nsis
         run: |
           npm ci
           npm run e2e:install
