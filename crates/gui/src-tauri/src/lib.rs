@@ -23,6 +23,18 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// На Linux отключает dmabuf-рендер webkit2gtk: на части GPU/драйверов он даёт
+/// белое окно/артефакты. No-op на других ОС и если переменная задана снаружи.
+/// Вызывать в начале `run()` — ДО инициализации webkit (создания окна).
+fn disable_webkit_dmabuf() {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+}
+
 /// Map a service reply to a command result. `Event::Error` becomes `Err`.
 fn into_status(reply: io::Result<Event>) -> Result<Status, String> {
     match reply {
@@ -104,6 +116,7 @@ fn toggle_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    disable_webkit_dmabuf();
     tauri::Builder::default()
         .setup(|app| {
             build_tray(app)?;
