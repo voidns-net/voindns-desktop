@@ -1,0 +1,90 @@
+name: e2e
+
+# Installer end-to-end test (Windows NSIS + Linux RPM):
+#   1. build the installer
+#   2. install it headless ("--noconfirm")
+#   3. wait for the service the installer registered
+#   4. voidns connect custom 127.0.0.1 mock.voidns.test /dns-query <port>
+#   5. fire a DNS query at the proxy
+#   6. assert it reached the TypeScript mock DoH server
+# Runs on GitHub-hosted runners (repo is public → free standard runners).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "crates/**"
+      - "e2e/**"
+      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build service + CLI
+        run: cargo build --release -p voidns-service -p voidns-cli
+      - name: Stage sidecars
+        run: node crates/gui/scripts/stage-sidecars.mjs
+      - name: Build NSIS installer
+        working-directory: crates/gui
+        run: |
+          npm ci
+          npm run tauri -- build --bundles nsis
+
+      - name: Run installer e2e
+        working-directory: e2e
+        env:
+          BUNDLE_DIR: ${{ github.workspace }}/crates/gui/src-tauri/target/release/bundle/nsis
+        run: |
+          npm ci
+          npm run e2e:install
+
+  # Real Fedora environment: build the .rpm, install it, run the DNS-through-proxy
+  # assertion. Containers have no PID1 systemd, so %post `systemctl enable --now`
+  # is a no-op and the harness launches the installed service binary itself.
+  linux-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:40
+    steps:
+      - name: Install distro deps
+        run: |
+          dnf install -y \
+            git nodejs npm gcc gcc-c++ make file which curl tar xz rpm-build systemd \
+            webkit2gtk4.1-devel gtk3-devel librsvg2-devel \
+            libappindicator-gtk3-devel openssl-devel
+
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build service + CLI
+        run: cargo build --release -p voidns-service -p voidns-cli
+      - name: Stage sidecars
+        run: node crates/gui/scripts/stage-sidecars.mjs
+      - name: Build RPM installer
+        working-directory: crates/gui
+        run: |
+          npm ci
+          npm run tauri -- build --bundles rpm
+
+      - name: Run installer e2e (root)
+        working-directory: e2e
+        env:
+          BUNDLE_DIR: ${{ github.workspace }}/crates/gui/src-tauri/target/release/bundle/rpm
+          E2E_ALLOW_MANUAL_START: "1"
+        run: |
+          npm ci
+          npm run e2e:install

@@ -28,8 +28,31 @@ mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
+/// A redirector that does nothing. Selected when `VOIDNS_SKIP_REDIRECT` is set,
+/// so an unprivileged run (local dev, the e2e harness in `--mode dev`) can start
+/// the proxy and be queried directly on its loopback port without touching the
+/// system resolver. Never engaged in production or the privileged installer e2e,
+/// where the variable is unset and the real OS redirector runs.
+struct NoopRedirector;
+
+impl DnsRedirector for NoopRedirector {
+    fn apply(&mut self, _proxy: IpAddr) -> Result<()> {
+        Ok(())
+    }
+    fn restore(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn flush_cache(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// Construct the redirector for the current OS.
 pub fn new_redirector() -> Result<Box<dyn DnsRedirector>> {
+    if std::env::var_os("VOIDNS_SKIP_REDIRECT").is_some() {
+        tracing::warn!("VOIDNS_SKIP_REDIRECT set: system DNS will NOT be redirected");
+        return Ok(Box::new(NoopRedirector));
+    }
     #[cfg(target_os = "linux")]
     {
         Ok(Box::new(linux::LinuxRedirector::new()?))

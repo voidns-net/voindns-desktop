@@ -27,7 +27,8 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": ["nsis", "rpm"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,6 +36,26 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "externalBin": [
+      "binaries/voidns-service",
+      "binaries/voidns"
+    ],
+    "linux": {
+      "rpm": {
+        "files": {
+          "/usr/lib/systemd/system/voidns.service": "packaging/voidns.service"
+        },
+        "postInstallScript": "packaging/rpm/postinstall.sh",
+        "preRemoveScript": "packaging/rpm/preremove.sh",
+        "postRemoveScript": "packaging/rpm/postremove.sh"
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "packaging/windows/hooks.nsh"
+      }
+    }
   }
 }

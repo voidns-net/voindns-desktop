@@ -1,0 +1,80 @@
+name: installers
+
+# Build the Tauri installers that ship + register the privileged service.
+# Scope (per task): Windows (NSIS) and Linux (RPM) only.
+# Runs on GitHub-hosted runners (repo is public → free standard runners).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "crates/**"
+      - "e2e/**"
+      - ".github/workflows/installers.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-nsis:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build service + CLI (release)
+        run: cargo build --release -p voidns-service -p voidns-cli
+      - name: Stage sidecars for Tauri
+        run: node crates/gui/scripts/stage-sidecars.mjs
+      - name: Build NSIS installer
+        working-directory: crates/gui
+        run: |
+          npm ci
+          npm run tauri -- build --bundles nsis
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voidns-windows-nsis
+          path: crates/gui/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  # Real Fedora environment for the .rpm (GitHub-hosted runners support job
+  # containers natively).
+  linux-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:40
+    steps:
+      - name: Install distro deps
+        run: |
+          dnf install -y \
+            git nodejs npm gcc gcc-c++ make file which curl tar xz rpm-build \
+            webkit2gtk4.1-devel gtk3-devel librsvg2-devel \
+            libappindicator-gtk3-devel openssl-devel
+
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build service + CLI (release)
+        run: cargo build --release -p voidns-service -p voidns-cli
+      - name: Stage sidecars for Tauri
+        run: node crates/gui/scripts/stage-sidecars.mjs
+      - name: Build RPM installer
+        working-directory: crates/gui
+        run: |
+          npm ci
+          npm run tauri -- build --bundles rpm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voidns-linux-rpm
+          path: crates/gui/src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
